@@ -1,0 +1,27 @@
+{
+  "name": "Odoo Dev (mise)",
+  "dockerComposeFile": [
+    "compose.yml",
+    "../compose.yml"
+  ],
+  "service": "debian",
+  "workspaceFolder": "/work",
+  // "workspaceFolder": "${localWorkspaceFolder}",
+  // "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
+  "postCreateCommand": "bash .devcontainer/post_create.sh",
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:2": {
+            "configureZshAsDefaultShell": true
+        },
+        "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+    },
+  "mounts": [
+    "source=${localEnv:HOME}/.claude,target=/root/.claude,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude.json,target=/root/.claude.json,type=bind,consistency=cached"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": ["anthropic.claude-code"]
+    }
+  }
+}

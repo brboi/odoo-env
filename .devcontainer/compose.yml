@@ -1,0 +1,9 @@
+services:
+    debian:
+        image: debian
+        restart: unless-stopped
+        build:
+            context: .
+            dockerfile: ./Dockerfile
+        volumes:
+            - ../.:/work
