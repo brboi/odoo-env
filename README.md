@@ -60,41 +60,50 @@ install-wkhtmltopdf
 setup-odoo-repository odoo
 setup-odoo-repository enterprise
 
-# Create worktrees (suggests how to install Python deps at the end)
-odoo-env master --setup-only
+# Create worktrees (wizard runs on first use; suggests how to install Python deps at the end)
+odoo-env my-project --setup-only
 ```
 
 ## Usage
 
-### Version spec format
-
-```
-BRANCH                          # All repos on this branch
-BRANCH:repo#BRANCH              # Override one repo
-BRANCH:repo#BRANCH:repo2#BRANCH # Override multiple repos
-```
+Each environment has a name you choose freely (e.g. `my-project`, `fix-invoice`, `review-pr-42`).
+The first time you use a name, an interactive wizard asks for the branches and port.
+Settings are saved to `.cache/envs/<name>.json` and reused on subsequent runs.
 
 ### Examples
 
 ```bash
-# All repos on master
-odoo-env master
+# First use: wizard runs, then launches shell
+odoo-env my-project
 
-# Community on 18.0, enterprise on a feature branch
-odoo-env 18.0:enterprise#my-feature
+# Subsequent uses: loads saved settings immediately
+odoo-env my-project
 
-# Master with a PR on community
-odoo-env master:community#pr/12345
+# Re-run the wizard to change branches or port
+odoo-env my-project --reconfigure
+
+# List all configured environments
+odoo-env --list
 
 # Print env vars only (useful for eval)
-eval "$(odoo-env 18.0 --print-env)"
+eval "$(odoo-env my-project --print-env)"
 ```
+
+### Interactive wizard
+
+When creating a new environment, the wizard asks:
+
+1. **Base Odoo branch** — e.g. `master`, `18.0`, `17.0`
+2. **Branch per extra repo** — per repo found in `.cache/git/`, defaults to the base branch
+3. **HTTP port** — defaults to `8069`
 
 ### Options
 
 | Flag | Description |
 |------|-------------|
-| `--port PORT` | Odoo port (default: 8069) |
+| `--list` | List all configured environments |
+| `--reconfigure` | Re-run the interactive setup wizard |
+| `--port PORT` | Override HTTP port for this run (not saved) |
 | `--setup-only` | Create worktrees without launching a shell |
 | `--print-env` | Print `export` statements instead of launching a shell |
 
@@ -130,8 +139,9 @@ sets `ODOO_RC` automatically — no need to pass `--config` manually.
 odoo-env/
 ├── .cache/               # Gitignored runtime data
 │   ├── git/              # Bare repositories
+│   ├── envs/             # Saved environment settings (JSON)
 │   ├── postgres-data/    # Postgres volume
-│   └── sessions/{slug}/odoo.conf  # Generated merged config
+│   └── sessions/{name}/odoo.conf  # Generated merged config
 ├── src/                  # Worktrees (gitignored)
 │   ├── community/{branch}/
 │   └── enterprise/{branch}/
