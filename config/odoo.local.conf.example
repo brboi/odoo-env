@@ -1,6 +1,7 @@
 ; Local overrides — copy this file to odoo.local.conf (gitignored)
 ; Settings here are merged on top of odoo.conf by odoo-env at startup.
 [options]
+admin_passwd = Password
 ; db_host = myserver
 ; db_port = 5432
 ; db_user = myuser

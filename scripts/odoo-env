@@ -188,7 +188,7 @@ def build_odoo_conf(root_dir: Path, addons_path: str, port: int, slug: str) -> P
     if not cfg.has_section("options"):
         cfg.add_section("options")
     cfg["options"]["addons_path"] = addons_path
-    cfg["options"]["xmlrpc_port"] = str(port)
+    cfg["options"]["http_port"] = str(port)
 
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
