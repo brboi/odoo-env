@@ -20,6 +20,7 @@ Options: --port, --setup-only, --print-env
 import argparse
 import configparser
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -61,18 +62,30 @@ def git(bare_path: Path, *args: str, check: bool = True, capture: bool = False) 
     )
 
 
-def discovered_repos() -> list[str]:
-    """Aliases of bare repos in .cache/git/, excluding community, sorted."""
-    if not CACHE_DIR.is_dir():
-        return []
-    return sorted(
-        p.stem for p in CACHE_DIR.iterdir()
-        if p.is_dir() and p.suffix == ".git" and p.stem != "community"
-    )
+
+def stable_base(branch: str) -> str | None:
+    """Return the stable base of a feature branch, or None if already stable.
+
+    'master-parrot' -> 'master'
+    '17.0-fix'      -> '17.0'
+    'master'        -> None
+    '18.0'          -> None
+    """
+    if re.match(r'^\d+\.\d+$', branch) or branch == "master":
+        return None
+    if branch.startswith("master-"):
+        return "master"
+    m = re.match(r'^(\d+\.\d+)-', branch)
+    if m:
+        return m.group(1)
+    return None
 
 
-def parse_version_spec(spec: str) -> tuple[str, dict[str, str]]:
-    """Parse version spec into (base_branch, {repo: branch})."""
+def parse_version_spec(spec: str) -> tuple[str, dict[str, str], set[str]]:
+    """Parse version spec into (base_branch, {repo: branch}, explicit_repos).
+
+    Only community + explicitly mentioned repos are included.
+    """
     parts = spec.split(":")
     base_branch = parts[0]
     overrides: dict[str, str] = {}
@@ -84,26 +97,37 @@ def parse_version_spec(spec: str) -> tuple[str, dict[str, str]]:
         repo, branch = part.split("#", 1)
         overrides[repo] = branch
 
-    repos = ["community"] + discovered_repos()
-    for repo in overrides:
-        if repo not in repos:
-            repos.append(repo)
+    repos = ["community"] + [r for r in overrides if r != "community"]
+    return base_branch, {repo: overrides.get(repo, base_branch) for repo in repos}, set(overrides.keys())
 
-    return base_branch, {repo: overrides.get(repo, base_branch) for repo in repos}
+
+def remotes(bare_path: Path) -> list[str]:
+    """Return remotes ordered: origin first, then others alphabetically."""
+    result = git(bare_path, "remote", check=False, capture=True)
+    if result.returncode != 0:
+        return []
+    all_remotes = result.stdout.decode().split()
+    return sorted(all_remotes, key=lambda r: (0 if r == "origin" else 1, r))
 
 
 def fetch_repo(repo: str) -> None:
     bare_path = CACHE_DIR / f"{repo}.git"
-    if bare_path.is_dir():
-        log_info(f"Fetching {repo}...")
-        result = git(bare_path, "fetch", "origin", "--prune", check=False)
+    if not bare_path.is_dir():
+        return
+    for remote in remotes(bare_path):
+        log_info(f"Fetching {repo} ({remote})...")
+        result = git(bare_path, "fetch", remote, "--prune", check=False)
         if result.returncode != 0:
-            log_warn(f"Could not fetch {repo}")
+            log_warn(f"Could not fetch {repo} from {remote}")
 
 
-def ref_exists(bare_path: Path, ref: str) -> bool:
-    result = git(bare_path, "rev-parse", "--verify", f"origin/{ref}", check=False, capture=True)
-    return result.returncode == 0
+def find_ref(bare_path: Path, branch: str) -> str | None:
+    """Return the full remote ref (e.g. 'origin/branch') if it exists, else None."""
+    for remote in remotes(bare_path):
+        result = git(bare_path, "rev-parse", "--verify", f"{remote}/{branch}", check=False, capture=True)
+        if result.returncode == 0:
+            return f"{remote}/{branch}"
+    return None
 
 
 def ensure_worktree(repo: str, branch: str) -> Path | None:
@@ -121,15 +145,16 @@ def ensure_worktree(repo: str, branch: str) -> Path | None:
         log_ok(f"Worktree exists: {worktree_path}")
         return worktree_path
 
-    if not ref_exists(bare_path, branch):
-        log_error(f"Branch/ref not found: origin/{branch} in {repo}")
+    ref = find_ref(bare_path, branch)
+    if ref is None:
+        log_error(f"Branch/ref not found: {branch} in {repo}")
         log_info("Available branches:")
         git(bare_path, "branch", "-r", check=False)
         return None
 
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
-    log_info(f"Creating worktree: {repo}@{branch} -> {worktree_path}")
-    git(bare_path, "worktree", "add", str(worktree_path), f"origin/{branch}", "--detach")
+    log_info(f"Creating worktree: {repo}@{branch} -> {worktree_path} (from {ref})")
+    git(bare_path, "worktree", "add", str(worktree_path), ref, "--detach")
     log_ok(f"Created worktree: {worktree_path}")
     return worktree_path
 
@@ -221,7 +246,7 @@ def main() -> None:
     args = parser.parse_args()
 
     log_info(f"Parsing version spec: {args.version_spec}")
-    base_branch, repo_branches = parse_version_spec(args.version_spec)
+    base_branch, repo_branches, explicit_repos = parse_version_spec(args.version_spec)
 
     log_info(f"Base branch: {base_branch}")
     for repo, branch in repo_branches.items():
@@ -239,6 +264,12 @@ def main() -> None:
     worktree_paths: dict[str, Path] = {}
     for repo, branch in repo_branches.items():
         path = ensure_worktree(repo, branch)
+        if path is None and repo not in explicit_repos:
+            fallback = stable_base(branch)
+            if fallback:
+                log_warn(f"Branch {branch} not found in {repo}, falling back to {fallback}...")
+                fetch_repo(repo)
+                path = ensure_worktree(repo, fallback)
         if path is None:
             if repo == "community":
                 log_error("community worktree is required")
