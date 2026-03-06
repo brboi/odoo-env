@@ -4,7 +4,11 @@ node = "latest"
 
 [tasks.bootstrap]
 description = "Bootstrap pip into the venv (run once after mise install)"
-run = "python -m ensurepip --upgrade && python -m pip install --upgrade pip"
+run = "python -m ensurepip --upgrade && python -m pip install --upgrade pip && pip install pytest"
+
+[tasks.test]
+description = "Run unit tests"
+run = "python -m pytest tests/ -v"
 
 [tasks.services]
 description = "Start dev services (postgres, mailpit, pgweb)"
