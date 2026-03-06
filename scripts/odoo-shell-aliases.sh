@@ -1,0 +1,93 @@
+# odoo-shell-aliases.sh — Odoo development shell functions
+# Source this file from your ~/.bashrc or ~/.zshrc:
+#
+#   source /path/to/odoo-env/scripts/odoo-shell-aliases.sh
+#
+# Requires an active odoo-env shell (ODOO_PATH must be set).
+
+_odoo_check_env() {
+    if [ -z "$ODOO_PATH" ]; then
+        echo "[odoo-aliases] Not in an odoo-env shell. Run: odoo-env <env-name>" >&2
+        return 1
+    fi
+}
+
+# Launch Odoo server
+oo() {
+    _odoo_check_env || return 1
+    "$ODOO_PATH/odoo-bin" -c "$ODOO_RC" "$@"
+}
+
+# Launch Odoo with test runner
+otest() {
+    _odoo_check_env || return 1
+    "$ODOO_PATH/odoo-bin" -c "$ODOO_RC" --test-enable --stop-after-init "$@"
+}
+
+# cd to community worktree
+ocd() {
+    _odoo_check_env || return 1
+    cd "$ODOO_PATH"
+}
+
+# cd to enterprise worktree
+ocd-e() {
+    _odoo_check_env || return 1
+    if [ -z "$ODOO_ENTERPRISE_PATH" ]; then
+        echo "[odoo-aliases] No enterprise worktree in current env" >&2
+        return 1
+    fi
+    cd "$ODOO_ENTERPRISE_PATH"
+}
+
+# Run git in community worktree
+ogit() {
+    _odoo_check_env || return 1
+    git -C "$ODOO_PATH" "$@"
+}
+
+# Tail Odoo log (reads log_file from odoorc)
+olog() {
+    _odoo_check_env || return 1
+    local logfile
+    logfile=$(python3 -c "
+import configparser, os
+c = configparser.ConfigParser()
+c.read(os.environ['ODOO_RC'])
+print(c.get('options', 'logfile', fallback=''))
+" 2>/dev/null)
+    if [ -n "$logfile" ]; then
+        tail -f "$logfile"
+    else
+        echo "[odoo-aliases] No logfile configured in \$ODOO_RC" >&2
+    fi
+}
+
+# psql with Odoo DB settings
+odb() {
+    _odoo_check_env || return 1
+    local db_host db_port db_user db_pass db_name
+    eval "$(python3 -c "
+import configparser, os
+c = configparser.ConfigParser()
+c.read(os.environ['ODOO_RC'])
+opts = c['options'] if 'options' in c else {}
+print('db_host=' + opts.get('db_host', 'localhost'))
+print('db_port=' + opts.get('db_port', '5432'))
+print('db_user=' + opts.get('db_user', 'odoo'))
+print('db_pass=' + opts.get('db_password', ''))
+print('db_name=' + opts.get('db_name', ''))
+" 2>/dev/null)"
+    PGPASSWORD="$db_pass" psql -h "$db_host" -p "$db_port" -U "$db_user" "${1:-$db_name}"
+}
+
+# Print current environment summary
+oenv() {
+    _odoo_check_env || return 1
+    echo "ODOO_VERSION:    $ODOO_VERSION"
+    echo "ODOO_PATH:       $ODOO_PATH"
+    echo "ODOO_PORT:       $ODOO_PORT"
+    echo "ODOO_RC:         $ODOO_RC"
+    [ -n "$ODOO_ENTERPRISE_PATH" ] && echo "ODOO_ENTERPRISE_PATH: $ODOO_ENTERPRISE_PATH"
+    [ -n "$ODOO_EXTRA_PATHS" ] && echo "ODOO_EXTRA_PATHS: $ODOO_EXTRA_PATHS"
+}
