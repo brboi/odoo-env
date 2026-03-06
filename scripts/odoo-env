@@ -165,7 +165,7 @@ def setup_js_tooling(worktree_paths: dict[str, Path]) -> None:
                 subprocess.run(["npm", "install"], cwd=repo_path, check=False)
         else:
             nm = repo_path / "node_modules"
-            if not nm.exists():
+            if not nm.exists() and not nm.is_symlink():
                 nm.symlink_to(community_path / "node_modules")
                 log_ok(f"node_modules symlinked: {repo}")
 
