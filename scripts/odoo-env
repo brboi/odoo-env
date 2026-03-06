@@ -6,7 +6,7 @@ Usage:
     odoo-env --list
 
 The first time an environment is used, an interactive wizard configures
-the branches and port. Settings are saved to .cache/envs/<env-name>.json
+the branches and port. Settings are saved to .cache/envs/<env-name>.toml
 and reused on subsequent runs.
 
 Examples:
@@ -20,8 +20,8 @@ Options: --reconfigure, --port, --setup-only, --print-env, --list
 
 import argparse
 import configparser
-import json
 import os
+import tomllib
 import re
 import shutil
 import subprocess
@@ -216,22 +216,29 @@ def list_envs() -> list[str]:
     """Return sorted list of configured environment names."""
     if not ENVS_DIR.exists():
         return []
-    return sorted(p.stem for p in ENVS_DIR.glob("*.json"))
+    return sorted(p.stem for p in ENVS_DIR.glob("*.toml"))
 
 
 def load_env_settings(name: str) -> dict | None:
     """Load settings for a named environment, or None if not found."""
-    path = ENVS_DIR / f"{name}.json"
+    path = ENVS_DIR / f"{name}.toml"
     if path.exists():
-        return json.loads(path.read_text())
+        with open(path, "rb") as f:
+            return tomllib.load(f)
     return None
 
 
 def save_env_settings(name: str, settings: dict) -> None:
-    """Persist settings for a named environment to .cache/envs/<name>.json."""
+    """Persist settings for a named environment to .cache/envs/<name>.toml."""
     ENVS_DIR.mkdir(parents=True, exist_ok=True)
-    path = ENVS_DIR / f"{name}.json"
-    path.write_text(json.dumps(settings, indent=2) + "\n")
+    path = ENVS_DIR / f"{name}.toml"
+    lines = []
+    for key, value in settings.items():
+        if isinstance(value, str):
+            lines.append(f'{key} = "{value}"')
+        else:
+            lines.append(f"{key} = {value}")
+    path.write_text("\n".join(lines) + "\n")
     log_ok(f"Environment settings saved: {path.relative_to(ROOT_DIR)}")
 
 
