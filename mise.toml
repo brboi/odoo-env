@@ -1,0 +1,21 @@
+[tools]
+python = "3.12"
+node = "latest"
+
+[tasks.bootstrap]
+description = "Bootstrap pip into the venv (run once after mise install)"
+run = "python -m ensurepip --upgrade && python -m pip install --upgrade pip"
+
+[tasks.services]
+description = "Start dev services (postgres, mailpit, pgweb)"
+run = "docker compose up -d"
+
+[tasks.services-down]
+description = "Stop dev services"
+run = "docker compose down"
+
+[env]
+_.python.venv = { path = ".venv", create = true }
+_.path = ["{{config_root}}/scripts"]
+ODOO_DEV_ROOT = "{{config_root}}"
+

@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "anthropic.claude-code",
+    "odoo.owl-vision",
+    "odoo.odoo",
+    "ms-python.python"
+  ]
+}

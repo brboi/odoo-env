@@ -1,0 +1,25 @@
+# Cache et données locales
+.cache/
+.data/
+.venv/
+
+# Notes personnelles (sauf .gitkeep)
+.personal-notes/*
+!.personal-notes/.gitkeep
+
+# Sources Odoo (worktrees)
+src/
+
+# Python
+*.pyc
+__pycache__/
+*.egg-info/
+
+# IDE
+.idea/
+
+# Claude Code local settings
+.claude/
+
+# Local Odoo config overrides
+config/odoo.local.conf

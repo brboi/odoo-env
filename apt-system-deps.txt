@@ -1,0 +1,6 @@
+build-essential
+python3-dev
+libpq-dev
+libldap2-dev
+libsasl2-dev
+postgresql-client
