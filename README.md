@@ -131,7 +131,7 @@ odoo-env/
 ├── .cache/               # Gitignored runtime data
 │   ├── git/              # Bare repositories
 │   ├── postgres-data/    # Postgres volume
-│   └── odoo-active.conf  # Generated merged config
+│   └── sessions/{slug}/odoo.conf  # Generated merged config
 ├── src/                  # Worktrees (gitignored)
 │   ├── community/{branch}/
 │   └── enterprise/{branch}/
