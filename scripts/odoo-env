@@ -5,17 +5,16 @@ Usage:
     odoo-env <env-name> [options]
     odoo-env --list
 
-The first time an environment is used, an interactive wizard configures
-the branches and port. Settings are saved to .cache/envs/<env-name>.toml
-and reused on subsequent runs.
+Environments are declared in odoo-env.toml at the repo root.
+Copy odoo-env.toml.example to odoo-env.toml and customize.
 
 Examples:
-    odoo-env my-project              # Create or reuse "my-project"
-    odoo-env fix-invoice             # New env, wizard runs on first use
-    odoo-env my-project --reconfigure  # Re-run setup wizard
-    odoo-env --list                  # Show all configured environments
+    odoo-env my-project              # Set up worktrees and launch shell
+    odoo-env my-project --setup-only # Set up worktrees without launching shell
+    odoo-env my-project --odoorc     # Regenerate odoorc only, no shell
+    odoo-env --list                  # Show all environments from odoo-env.toml
 
-Options: --reconfigure, --port, --setup-only, --print-env, --list
+Options: --port, --setup-only, --odoorc, --print-env, --list
 """
 
 import argparse
@@ -30,8 +29,10 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CACHE_DIR = ROOT_DIR / ".cache" / "git"
-ENVS_DIR = ROOT_DIR / ".cache" / "envs"
 SRC_DIR = ROOT_DIR / "src"
+
+# Maps local alias → GitHub repo name (only non-identity mappings)
+REVERSE_ALIAS = {"community": "odoo"}
 
 # ANSI colors
 RED = "\033[0;31m"
@@ -92,10 +93,43 @@ def remotes(bare_path: Path) -> list[str]:
     return sorted(all_remotes, key=lambda r: (0 if r == "origin" else 1, r))
 
 
+def dev_remote_exists(repo: str) -> bool:
+    result = subprocess.run(
+        ["git", "ls-remote", f"git@github.com:odoo-dev/{repo}.git"],
+        capture_output=True, check=False,
+    )
+    return result.returncode == 0
+
+
+def setup_bare_repo(alias: str) -> None:
+    github_repo = REVERSE_ALIAS.get(alias, alias)
+    repo_url = f"git@github.com:odoo/{github_repo}.git"
+    bare_path = CACHE_DIR / f"{alias}.git"
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    log_info(f"Cloning bare repository: {repo_url} -> {bare_path}")
+    subprocess.run(["git", "clone", "--bare", repo_url, str(bare_path)], check=True)
+
+    # Configure refspecs
+    git(bare_path, "config", "--replace-all", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+    git(bare_path, "config", "--add", "remote.origin.fetch", "+refs/pull/*/head:refs/remotes/origin/pr/*")
+
+    # Dev remote
+    log_info(f"Checking for dev remote (github.com/odoo-dev/{github_repo})...")
+    if dev_remote_exists(github_repo):
+        dev_url = f"git@github.com:odoo-dev/{github_repo}.git"
+        git(bare_path, "remote", "add", "dev", dev_url)
+        git(bare_path, "config", "--replace-all", "remote.dev.fetch", "+refs/heads/*:refs/remotes/dev/*")
+        log_ok(f"Dev remote added: {dev_url}")
+
+    log_ok(f"Repository ready: {bare_path.relative_to(ROOT_DIR)}")
+
+
 def fetch_repo(repo: str) -> None:
     bare_path = CACHE_DIR / f"{repo}.git"
     if not bare_path.is_dir():
-        return
+        log_info(f"Bare repo not found for '{repo}', setting it up automatically...")
+        setup_bare_repo(repo)
     for remote in remotes(bare_path):
         log_info(f"Fetching {repo} ({remote})...")
         result = git(bare_path, "fetch", remote, "--prune", check=False)
@@ -117,7 +151,6 @@ def ensure_worktree(repo: str, branch: str) -> Path | None:
 
     if not bare_path.is_dir():
         log_error(f"Bare repo not found: {bare_path}")
-        log_info(f"Run: setup-odoo-repository {repo}")
         return None
 
     branch_dir = branch.replace("/", "-")
@@ -177,19 +210,21 @@ def setup_js_tooling(worktree_paths: dict[str, Path]) -> None:
                 log_ok(f"node_modules symlinked: {repo}")
 
 
-def build_odoo_conf(root_dir: Path, addons_path: str, port: int, name: str) -> Path:
-    base  = root_dir / "config" / "odoo.conf"
-    local = root_dir / "config" / "odoo.local.conf"
-    out   = root_dir / ".cache" / "sessions" / name / "odoo.conf"
+def build_odoo_conf(root_dir: Path, addons_path: str, port: int, name: str, defaults: dict, odoorc_overrides: dict) -> Path:
+    """Write .cache/envs/<name>/odoorc from merged defaults + overrides."""
+    out = root_dir / ".cache" / "envs" / name / "odoorc"
 
     cfg = configparser.ConfigParser()
-    if base.exists():
-        cfg.read(base)
-    if local.exists():
-        cfg.read(local)
+    cfg.add_section("options")
 
-    if not cfg.has_section("options"):
-        cfg.add_section("options")
+    # Apply global defaults then env-specific overrides (port handled separately)
+    for key, value in defaults.items():
+        if key != "port":
+            cfg["options"][key] = str(value)
+    for key, value in odoorc_overrides.items():
+        if key != "port":
+            cfg["options"][key] = str(value)
+
     cfg["options"]["addons_path"] = addons_path
     cfg["options"]["http_port"] = str(port)
 
@@ -210,92 +245,49 @@ def build_paths(community_path: Path, extra_worktrees: dict[str, Path]) -> tuple
     return python_path, ",".join(addons_parts)
 
 
-# --- Environment settings management ---
+# --- odoo-env.toml management ---
 
-def list_envs() -> list[str]:
-    """Return sorted list of configured environment names."""
-    if not ENVS_DIR.exists():
-        return []
-    return sorted(p.stem for p in ENVS_DIR.glob("*.toml"))
+def load_odoo_env_toml() -> dict:
+    """Load odoo-env.toml from ROOT_DIR. If missing, copy from .example and exit."""
+    toml_path = ROOT_DIR / "odoo-env.toml"
+    example_path = ROOT_DIR / "odoo-env.toml.example"
 
-
-def load_env_settings(name: str) -> dict | None:
-    """Load settings for a named environment, or None if not found."""
-    path = ENVS_DIR / f"{name}.toml"
-    if path.exists():
-        with open(path, "rb") as f:
-            return tomllib.load(f)
-    return None
-
-
-def save_env_settings(name: str, settings: dict) -> None:
-    """Persist settings for a named environment to .cache/envs/<name>.toml."""
-    ENVS_DIR.mkdir(parents=True, exist_ok=True)
-    path = ENVS_DIR / f"{name}.toml"
-    lines = []
-    for key, value in settings.items():
-        if isinstance(value, str):
-            lines.append(f'{key} = "{value}"')
+    if not toml_path.exists():
+        if example_path.exists():
+            shutil.copy2(example_path, toml_path)
+            log_ok("Created odoo-env.toml from example.")
+            print("  Edit odoo-env.toml to configure your environments, then re-run.", file=sys.stderr)
         else:
-            lines.append(f"{key} = {value}")
-    path.write_text("\n".join(lines) + "\n")
-    try:
-        display = path.relative_to(ROOT_DIR)
-    except ValueError:
-        display = path
-    log_ok(f"Environment settings saved: {display}")
+            log_error("odoo-env.toml not found (and no odoo-env.toml.example to copy from).")
+        sys.exit(1)
+
+    with open(toml_path, "rb") as f:
+        return tomllib.load(f)
 
 
-def detect_available_repos() -> list[str]:
-    """Return repos available as bare clones in .cache/git/, community first."""
-    if not CACHE_DIR.exists():
-        return ["community"]
-    repos = sorted(p.stem for p in CACHE_DIR.glob("*.git") if p.is_dir())
-    if not repos:
-        return ["community"]
-    # Ensure community comes first
-    if "community" in repos:
-        repos = ["community"] + [r for r in repos if r != "community"]
-    return repos
+def list_envs(toml_data: dict) -> list[str]:
+    """Return sorted list of all env names except '_'."""
+    return sorted(k for k in toml_data if k != "_")
 
 
-def run_interactive_wizard(name: str) -> dict:
-    """Interactively configure a new (or existing) environment."""
-    available_repos = detect_available_repos()
+def get_env(toml_data: dict, name: str) -> dict:
+    """Return the env section dict. sys.exit(1) if not found or no effective branches."""
+    if name == "_" or name not in toml_data:
+        log_error(f"Environment '{name}' not found in odoo-env.toml")
+        envs = list_envs(toml_data)
+        if envs:
+            print(f"  Available: {', '.join(envs)}", file=sys.stderr)
+        sys.exit(1)
 
-    print(file=sys.stderr)
-    print(f"{BLUE}  Configuring environment: {name}{NC}", file=sys.stderr)
-    print(file=sys.stderr)
+    env_section = toml_data[name]
+    default_branches = toml_data.get("_", {}).get("branches", {})
+    effective_branches = {**default_branches, **env_section.get("branches", {})}
 
-    # Base branch (drives community and becomes the default for other repos)
-    base_branch = input("  Base Odoo branch (e.g. master, 18.0, 17.0) [master]: ").strip()
-    if not base_branch:
-        base_branch = "master"
+    if not effective_branches:
+        log_error(f"Environment '{name}' has no branches configured in odoo-env.toml")
+        sys.exit(1)
 
-    settings: dict = {"community": base_branch, "port": 8069}
-
-    # Per-repo overrides for extra repos found in .cache/git/
-    other_repos = [r for r in available_repos if r != "community"]
-    if other_repos:
-        print(file=sys.stderr)
-        print(f"  Other repos found: {', '.join(other_repos)}", file=sys.stderr)
-        print(f"  Press Enter to use the base branch ({base_branch}).", file=sys.stderr)
-        print(file=sys.stderr)
-        for repo in other_repos:
-            branch = input(f"  Branch for {repo} [{base_branch}]: ").strip()
-            settings[repo] = branch if branch else base_branch
-
-    # Port
-    print(file=sys.stderr)
-    port_input = input("  HTTP port [8069]: ").strip()
-    if port_input:
-        try:
-            settings["port"] = int(port_input)
-        except ValueError:
-            log_warn(f"Invalid port {port_input!r}, using 8069")
-
-    print(file=sys.stderr)
-    return settings
+    return env_section
 
 
 def main() -> None:
@@ -305,25 +297,27 @@ def main() -> None:
         epilog=__doc__,
     )
     parser.add_argument("env_name", nargs="?", help="Environment name (e.g. my-project, fix-invoice)")
-    parser.add_argument("--list", action="store_true", help="List configured environments")
-    parser.add_argument("--reconfigure", action="store_true", help="Re-run the interactive setup wizard")
-    parser.add_argument("--port", type=int, help="Override HTTP port for this run (not saved)")
+    parser.add_argument("--list", action="store_true", help="List environments from odoo-env.toml")
+    parser.add_argument("--port", type=int, help="Override HTTP port for this run")
     parser.add_argument("--setup-only", action="store_true", help="Create worktrees without launching shell")
+    parser.add_argument("--odoorc", action="store_true", help="Regenerate .cache/envs/{name}/odoorc from current settings, no shell")
     parser.add_argument("--print-env", action="store_true", help="Print environment variables only")
 
     args = parser.parse_args()
 
+    toml_data = load_odoo_env_toml()
+
     if args.list:
-        envs = list_envs()
+        envs = list_envs(toml_data)
         if envs:
             print("Configured environments:")
-            for env in envs:
-                s = load_env_settings(env)
-                repos_info = ", ".join(f"{r}@{b}" for r, b in s.items() if r != "port") if s else "?"
-                print(f"  {GREEN}{env}{NC}  ({repos_info})")
+            for env_name in envs:
+                env_section = toml_data[env_name]
+                branches = env_section.get("branches", {})
+                repos_info = ", ".join(f"{r}@{b}" for r, b in branches.items())
+                print(f"  {GREEN}{env_name}{NC}  ({repos_info})")
         else:
-            print("No environments configured yet.")
-            print("Create one with: odoo-env <env-name>")
+            print("No environments configured in odoo-env.toml.")
         sys.exit(0)
 
     if not args.env_name:
@@ -331,28 +325,43 @@ def main() -> None:
         sys.exit(1)
 
     name = args.env_name
+    env_section = get_env(toml_data, name)
 
-    # Load or interactively create settings
-    settings = load_env_settings(name)
-    if settings is None:
-        log_info(f"New environment: {name!r} — running setup wizard")
-        settings = run_interactive_wizard(name)
-        save_env_settings(name, settings)
-    elif args.reconfigure:
-        log_info(f"Reconfiguring environment: {name!r}")
-        settings = run_interactive_wizard(name)
-        save_env_settings(name, settings)
+    default_branches: dict[str, str] = toml_data.get("_", {}).get("branches", {})
+    repo_branches: dict[str, str] = {**default_branches, **env_section.get("branches", {})}
 
-    # Port: CLI flag overrides saved value (override is not persisted)
-    port = args.port if args.port is not None else settings.get("port", 8069)
-
-    repo_branches: dict[str, str] = {k: v for k, v in settings.items() if k != "port"}
     if "community" not in repo_branches:
-        log_error("Settings are missing the 'community' branch. Run with --reconfigure.")
+        log_error("'community' branch is required but not found in branches for this environment.")
         sys.exit(1)
+
+    defaults = toml_data.get("_", {}).get("odoorc", {})
+    odoorc_overrides = env_section.get("odoorc", {})
+
+    # Port: env odoorc → global default → fallback 8069; CLI flag overrides all
+    port = args.port if args.port is not None else int(odoorc_overrides.get("port", defaults.get("port", 8069)))
 
     community_branch = repo_branches["community"]
     odoo_version = stable_base(community_branch) or community_branch
+
+    if args.odoorc:
+        # Use existing worktrees only — no fetch, no create
+        worktree_paths = {}
+        for repo, branch in repo_branches.items():
+            branch_dir = branch.replace("/", "-")
+            path = SRC_DIR / repo / branch_dir
+            if path.is_dir():
+                worktree_paths[repo] = path
+
+        community_path = worktree_paths.get("community")
+        if community_path is None:
+            log_error("Community worktree not found. Run without --odoorc to set up first.")
+            sys.exit(1)
+
+        extra_worktrees = {r: p for r, p in worktree_paths.items() if r != "community"}
+        _, addons_path = build_paths(community_path, extra_worktrees)
+        odoo_conf = build_odoo_conf(ROOT_DIR, addons_path, port, name, defaults, odoorc_overrides)
+        log_ok(f"Generated: {odoo_conf.relative_to(ROOT_DIR)}")
+        sys.exit(0)
 
     log_info(f"Environment: {name}")
     for repo, branch in repo_branches.items():
@@ -393,7 +402,7 @@ def main() -> None:
 
     extra_worktrees = {repo: path for repo, path in worktree_paths.items() if repo != "community"}
     python_path, addons_path = build_paths(community_path, extra_worktrees)
-    odoo_conf = build_odoo_conf(ROOT_DIR, addons_path, port, name)
+    odoo_conf = build_odoo_conf(ROOT_DIR, addons_path, port, name, defaults, odoorc_overrides)
 
     enterprise_path = worktree_paths.get("enterprise")
     env = {
