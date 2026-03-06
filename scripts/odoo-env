@@ -4,6 +4,9 @@
 Usage:
     odoo-env <env-name> [options]
     odoo-env --list
+    odoo-env status [env]
+    odoo-env sync [env]
+    odoo-env cleanup [env] [--delete-branches]
 
 Environments are declared in odoo-env.toml at the repo root.
 Copy odoo-env.toml.example to odoo-env.toml and customize.
@@ -13,6 +16,9 @@ Examples:
     odoo-env my-project --setup-only # Set up worktrees without launching shell
     odoo-env my-project --odoorc     # Regenerate odoorc only, no shell
     odoo-env --list                  # Show all environments from odoo-env.toml
+    odoo-env status                  # Show git status of all worktrees
+    odoo-env sync my-project         # Fetch + rebase worktrees onto upstream
+    odoo-env cleanup my-project      # Remove worktrees
 
 Options: --port, --setup-only, --odoorc, --print-env, --list
 """
@@ -66,6 +72,15 @@ def git(bare_path: Path, *args: str, check: bool = True, capture: bool = False) 
     )
 
 
+def git_wt(worktree_path: Path, *args: str, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
+    """Run a git command inside a (non-bare) worktree directory."""
+    return subprocess.run(
+        ["git", "-C", str(worktree_path), *args],
+        check=check,
+        capture_output=capture,
+    )
+
+
 def stable_base(branch: str) -> str | None:
     """Return the stable base of a feature branch, or None if already stable.
 
@@ -101,35 +116,42 @@ def dev_remote_exists(repo: str) -> bool:
     return result.returncode == 0
 
 
-def setup_bare_repo(alias: str) -> None:
-    github_repo = REVERSE_ALIAS.get(alias, alias)
-    repo_url = f"git@github.com:odoo/{github_repo}.git"
+def setup_bare_repo(alias: str, url: str | None = None) -> None:
+    if url is None:
+        github_repo = REVERSE_ALIAS.get(alias, alias)
+        url = f"git@github.com:odoo/{github_repo}.git"
+        check_dev_remote = True
+    else:
+        github_repo = alias
+        check_dev_remote = False
+
     bare_path = CACHE_DIR / f"{alias}.git"
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    log_info(f"Cloning bare repository: {repo_url} -> {bare_path}")
-    subprocess.run(["git", "clone", "--bare", repo_url, str(bare_path)], check=True)
+    log_info(f"Cloning bare repository: {url} -> {bare_path}")
+    subprocess.run(["git", "clone", "--bare", url, str(bare_path)], check=True)
 
     # Configure refspecs
     git(bare_path, "config", "--replace-all", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
     git(bare_path, "config", "--add", "remote.origin.fetch", "+refs/pull/*/head:refs/remotes/origin/pr/*")
 
-    # Dev remote
-    log_info(f"Checking for dev remote (github.com/odoo-dev/{github_repo})...")
-    if dev_remote_exists(github_repo):
-        dev_url = f"git@github.com:odoo-dev/{github_repo}.git"
-        git(bare_path, "remote", "add", "dev", dev_url)
-        git(bare_path, "config", "--replace-all", "remote.dev.fetch", "+refs/heads/*:refs/remotes/dev/*")
-        log_ok(f"Dev remote added: {dev_url}")
+    # Dev remote (only for odoo repos)
+    if check_dev_remote:
+        log_info(f"Checking for dev remote (github.com/odoo-dev/{github_repo})...")
+        if dev_remote_exists(github_repo):
+            dev_url = f"git@github.com:odoo-dev/{github_repo}.git"
+            git(bare_path, "remote", "add", "dev", dev_url)
+            git(bare_path, "config", "--replace-all", "remote.dev.fetch", "+refs/heads/*:refs/remotes/dev/*")
+            log_ok(f"Dev remote added: {dev_url}")
 
     log_ok(f"Repository ready: {bare_path.relative_to(ROOT_DIR)}")
 
 
-def fetch_repo(repo: str) -> None:
+def fetch_repo(repo: str, url: str | None = None) -> None:
     bare_path = CACHE_DIR / f"{repo}.git"
     if not bare_path.is_dir():
         log_info(f"Bare repo not found for '{repo}', setting it up automatically...")
-        setup_bare_repo(repo)
+        setup_bare_repo(repo, url=url)
     for remote in remotes(bare_path):
         log_info(f"Fetching {repo} ({remote})...")
         result = git(bare_path, "fetch", remote, "--prune", check=False)
@@ -144,6 +166,12 @@ def find_ref(bare_path: Path, branch: str) -> str | None:
         if result.returncode == 0:
             return f"{remote}/{branch}"
     return None
+
+
+def local_branch_exists(bare_path: Path, branch: str) -> bool:
+    """Return True if a local branch exists in the bare repo."""
+    result = git(bare_path, "branch", "--list", branch, check=False, capture=True)
+    return result.returncode == 0 and result.stdout.decode().strip() != ""
 
 
 def ensure_worktree(repo: str, branch: str) -> Path | None:
@@ -169,7 +197,15 @@ def ensure_worktree(repo: str, branch: str) -> Path | None:
 
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
     log_info(f"Creating worktree: {repo}@{branch} -> {worktree_path} (from {ref})")
-    git(bare_path, "worktree", "add", str(worktree_path), ref, "--detach")
+
+    if not local_branch_exists(bare_path, branch):
+        git(bare_path, "branch", "--track", branch, ref)
+
+    result = git(bare_path, "worktree", "add", str(worktree_path), branch, check=False)
+    if result.returncode != 0:
+        log_error(f"Failed to create worktree for {repo}@{branch}")
+        return None
+
     log_ok(f"Created worktree: {worktree_path}")
     return worktree_path
 
@@ -245,6 +281,41 @@ def build_paths(community_path: Path, extra_worktrees: dict[str, Path]) -> tuple
     return python_path, ",".join(addons_parts)
 
 
+def generate_odools_config(env_name: str, worktree_paths: dict[str, Path], python_path: str) -> Path:
+    """Write odools.toml for the Odoo LSP (gitignored, regenerated each run)."""
+    community_path = worktree_paths["community"]
+    enterprise_path = worktree_paths.get("enterprise")
+
+    addons_paths = []
+    if enterprise_path:
+        addons_paths.append(str(enterprise_path))
+    addons_paths.append(str(community_path / "addons"))
+    addons_paths.append(str(community_path / "odoo" / "addons"))
+    for repo, path in worktree_paths.items():
+        if repo not in ("community", "enterprise"):
+            addons_paths.append(str(path))
+
+    lines = [
+        "# Auto-generated by odoo-env — do not edit manually",
+        f"# Active environment: {env_name}",
+        "",
+        "[[config]]",
+        f'name = "Odoo Dev — {env_name}"',
+        f'odoo_path = "{community_path}"',
+        "addons_paths = [",
+    ]
+    for p in addons_paths:
+        lines.append(f'    "{p}",')
+    lines.append("]")
+    lines.append(f'python_path = "{python_path}"')
+    lines.append("")
+
+    out = ROOT_DIR / "odools.toml"
+    out.write_text("\n".join(lines))
+    log_ok(f"Generated: {out.relative_to(ROOT_DIR)}")
+    return out
+
+
 # --- odoo-env.toml management ---
 
 def load_odoo_env_toml() -> dict:
@@ -290,7 +361,148 @@ def get_env(toml_data: dict, name: str) -> dict:
     return env_section
 
 
+def _repo_branches_for_env(toml_data: dict, env_name: str) -> dict[str, str]:
+    """Return effective {repo: branch} dict for an environment."""
+    env_section = toml_data.get(env_name, {})
+    default_branches: dict[str, str] = toml_data.get("_", {}).get("branches", {})
+    return {**default_branches, **env_section.get("branches", {})}
+
+
+def _repo_urls_for_env(toml_data: dict, env_name: str) -> dict[str, str]:
+    """Return effective {repo: url} dict for an environment (custom repos only)."""
+    default_repos: dict[str, str] = toml_data.get("_", {}).get("repos", {})
+    env_repos: dict[str, str] = toml_data.get(env_name, {}).get("repos", {})
+    return {**default_repos, **env_repos}
+
+
+# --- Subcommands ---
+
+def cmd_status(env_names: list[str], toml_data: dict) -> None:
+    """Show git status (branch, ahead/behind, dirty) for each worktree."""
+    for env_name in env_names:
+        print(f"\n{BLUE}{env_name}{NC}")
+        repo_branches = _repo_branches_for_env(toml_data, env_name)
+
+        for repo, branch in repo_branches.items():
+            branch_dir = branch.replace("/", "-")
+            worktree_path = SRC_DIR / repo / branch_dir
+
+            if not worktree_path.is_dir():
+                print(f"  {YELLOW}{repo}@{branch}{NC}  [not created]")
+                continue
+
+            head = git_wt(worktree_path, "symbolic-ref", "--short", "HEAD", check=False, capture=True)
+            current_branch = head.stdout.decode().strip() if head.returncode == 0 else "(detached)"
+
+            ab = git_wt(worktree_path, "rev-list", "--left-right", "--count", "@{u}...HEAD",
+                        check=False, capture=True)
+            if ab.returncode == 0:
+                parts = ab.stdout.decode().strip().split()
+                ab_str = f"↓{parts[0]} ↑{parts[1]}"
+            else:
+                ab_str = "(no upstream)"
+
+            dirty = git_wt(worktree_path, "status", "--porcelain", check=False, capture=True)
+            dirty_str = f"  {RED}*dirty*{NC}" if dirty.stdout.decode().strip() else ""
+
+            print(f"  {GREEN}{repo}{NC}@{current_branch}  {ab_str}{dirty_str}")
+
+
+def cmd_sync(env_names: list[str], toml_data: dict) -> None:
+    """Fetch bare repos and rebase tracking worktrees onto their upstream."""
+    repos_to_fetch: set[str] = set()
+    for env_name in env_names:
+        repos_to_fetch.update(_repo_branches_for_env(toml_data, env_name).keys())
+
+    # Collect all URLs across targeted envs
+    repo_urls: dict[str, str] = {}
+    for env_name in env_names:
+        repo_urls.update(_repo_urls_for_env(toml_data, env_name))
+
+    for repo in sorted(repos_to_fetch):
+        fetch_repo(repo, url=repo_urls.get(repo))
+
+    for env_name in env_names:
+        repo_branches = _repo_branches_for_env(toml_data, env_name)
+        for repo, branch in repo_branches.items():
+            branch_dir = branch.replace("/", "-")
+            worktree_path = SRC_DIR / repo / branch_dir
+            if not worktree_path.is_dir():
+                log_warn(f"Worktree not found, skipping: {worktree_path}")
+                continue
+
+            head = git_wt(worktree_path, "symbolic-ref", "HEAD", check=False, capture=True)
+            if head.returncode != 0:
+                log_warn(f"Detached HEAD in {worktree_path}, skipping rebase")
+                continue
+
+            log_info(f"Syncing {repo}@{branch}...")
+            result = git_wt(worktree_path, "rebase", "--autostash", "@{u}", check=False)
+            if result.returncode != 0:
+                log_warn(f"Rebase failed for {repo}@{branch} — resolve manually")
+            else:
+                log_ok(f"Synced: {repo}@{branch}")
+
+
+def cmd_cleanup(env_names: list[str], toml_data: dict, delete_branches: bool = False) -> None:
+    """Remove worktrees for the given environments."""
+    for env_name in env_names:
+        repo_branches = _repo_branches_for_env(toml_data, env_name)
+        for repo, branch in repo_branches.items():
+            branch_dir = branch.replace("/", "-")
+            worktree_path = SRC_DIR / repo / branch_dir
+            bare_path = CACHE_DIR / f"{repo}.git"
+
+            if not worktree_path.is_dir():
+                continue
+
+            dirty = git_wt(worktree_path, "status", "--porcelain", check=False, capture=True)
+            if dirty.stdout.decode().strip():
+                log_error(f"Worktree is dirty, skipping: {worktree_path}")
+                log_info("Commit or stash your changes before running cleanup.")
+                continue
+
+            log_info(f"Removing worktree: {worktree_path}")
+            git(bare_path, "worktree", "remove", str(worktree_path), check=False)
+
+            if delete_branches and stable_base(branch) is not None:
+                if local_branch_exists(bare_path, branch):
+                    log_info(f"Deleting local branch: {branch} in {repo}")
+                    git(bare_path, "branch", "-D", branch, check=False)
+
+    # Prune stale worktree metadata from all bare repos
+    for repo in set(r for env in env_names for r in _repo_branches_for_env(toml_data, env)):
+        bare_path = CACHE_DIR / f"{repo}.git"
+        if bare_path.is_dir():
+            git(bare_path, "worktree", "prune", check=False)
+
+
+def run_subcommand(subcmd: str, argv: list[str]) -> None:
+    sub_parser = argparse.ArgumentParser(prog=f"odoo-env {subcmd}")
+    sub_parser.add_argument("env_names", nargs="*", help="Environment name(s), or omit for all")
+    if subcmd == "cleanup":
+        sub_parser.add_argument("--delete-branches", action="store_true",
+                                help="Also delete local feature branches")
+    args = sub_parser.parse_args(argv)
+
+    toml_data = load_odoo_env_toml()
+    env_names = args.env_names if args.env_names else list_envs(toml_data)
+
+    if subcmd == "status":
+        cmd_status(env_names, toml_data)
+    elif subcmd == "sync":
+        cmd_sync(env_names, toml_data)
+    elif subcmd == "cleanup":
+        cmd_cleanup(env_names, toml_data, getattr(args, "delete_branches", False))
+
+
 def main() -> None:
+    # Dispatch subcommands before the flat parser sees them
+    SUBCOMMANDS = {"sync", "cleanup", "status"}
+    if len(sys.argv) > 1 and sys.argv[1] in SUBCOMMANDS:
+        run_subcommand(sys.argv[1], sys.argv[2:])
+        return
+
     parser = argparse.ArgumentParser(
         description="Configure and launch an Odoo development environment",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -334,6 +546,9 @@ def main() -> None:
         log_error("'community' branch is required but not found in branches for this environment.")
         sys.exit(1)
 
+    # Custom repo URLs: merge global defaults + env-specific
+    repo_urls = _repo_urls_for_env(toml_data, name)
+
     defaults = toml_data.get("_", {}).get("odoorc", {})
     odoorc_overrides = env_section.get("odoorc", {})
 
@@ -358,9 +573,10 @@ def main() -> None:
             sys.exit(1)
 
         extra_worktrees = {r: p for r, p in worktree_paths.items() if r != "community"}
-        _, addons_path = build_paths(community_path, extra_worktrees)
+        python_path, addons_path = build_paths(community_path, extra_worktrees)
         odoo_conf = build_odoo_conf(ROOT_DIR, addons_path, port, name, defaults, odoorc_overrides)
         log_ok(f"Generated: {odoo_conf.relative_to(ROOT_DIR)}")
+        generate_odools_config(name, worktree_paths, python_path)
         sys.exit(0)
 
     log_info(f"Environment: {name}")
@@ -373,7 +589,7 @@ def main() -> None:
     for repo, branch in repo_branches.items():
         branch_dir = branch.replace("/", "-")
         if not (SRC_DIR / repo / branch_dir).is_dir():
-            fetch_repo(repo)
+            fetch_repo(repo, url=repo_urls.get(repo))
 
     # Create worktrees (with stable-base fallback for non-community repos)
     worktree_paths: dict[str, Path] = {}
@@ -383,7 +599,7 @@ def main() -> None:
             fallback = stable_base(branch)
             if fallback:
                 log_warn(f"Branch {branch!r} not found in {repo}, falling back to {fallback!r}...")
-                fetch_repo(repo)
+                fetch_repo(repo, url=repo_urls.get(repo))
                 path = ensure_worktree(repo, fallback)
         if path is None:
             if repo == "community":
@@ -404,7 +620,13 @@ def main() -> None:
     python_path, addons_path = build_paths(community_path, extra_worktrees)
     odoo_conf = build_odoo_conf(ROOT_DIR, addons_path, port, name, defaults, odoorc_overrides)
 
+    generate_odools_config(name, worktree_paths, python_path)
+
     enterprise_path = worktree_paths.get("enterprise")
+    extra_paths = ":".join(
+        str(p) for r, p in worktree_paths.items()
+        if r not in ("community", "enterprise")
+    )
     env = {
         "ODOO_VERSION": odoo_version,
         "ODOO_RC": str(odoo_conf),
@@ -413,6 +635,7 @@ def main() -> None:
         "ODOO_PORT": str(port),
         "ODOO_PATH": str(community_path),
         "ODOO_ENTERPRISE_PATH": str(enterprise_path) if enterprise_path else "",
+        "ODOO_EXTRA_PATHS": extra_paths,
         "PATH": str(community_path) + ":" + os.environ.get("PATH", ""),
     }
 

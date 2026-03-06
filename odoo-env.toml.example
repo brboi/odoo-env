@@ -4,8 +4,10 @@
 #
 # [_.odoorc]        global Odoo conf defaults applied to all environments
 # [_.branches]      global branch defaults merged into every environment
+# [_.repos]         global custom repo URLs (alias → git URL)
 # [env.branches]    repo → branch mapping (community is required; env-specific wins over defaults)
 # [env.odoorc]      per-env Odoo conf overrides — optional
+# [env.repos]       custom repo URLs for non-odoo repos (alias → git URL)
 
 [_.odoorc]
 admin_password = "Password"
@@ -31,3 +33,18 @@ enterprise = "18.0-fix"
 [my-other.odoorc]
 port = 8069
 db_name = "mydb"
+
+# Custom (non-odoo) repos: declare URL here, reference branch in [env.branches]
+# [my-client.branches]
+# community = "17.0"
+# enterprise = "17.0"
+# my-addons = "main"
+#
+# [my-client.repos]
+# my-addons = "git@github.com:myclient/odoo-addons.git"
+
+# Global custom repos available in all environments:
+# [_.repos]
+# utils = "git@github.com:mycompany/odoo-utils.git"
+# [_.branches]
+# utils = "main"

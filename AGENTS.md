@@ -24,13 +24,15 @@ odoo-env/
 │   └── ...
 ├── scripts/                  # Auto-added to $PATH by mise
 │   ├── odoo-env              # Main script (Python)
+│   ├── odoo-shell-aliases.sh  # Shell functions (bash/zsh) — source manually
+│   ├── odoo-shell-aliases.fish # Shell functions (fish) — source manually
 │   └── install-wkhtmltopdf  # Debian/Ubuntu only, kept as bash
 ├── .venv/                    # Python venv (managed by mise)
 ├── compose.yml               # Optional dev services
 ├── mise.toml
 ├── odoo-env.toml             # Environment declarations (gitignored, copy from .example)
 ├── odoo-env.toml.example     # Committed template
-├── odools.toml               # Odoo Language Server config
+├── odools.toml               # Odoo Language Server config (gitignored, auto-generated)
 └── .gitignore
 ```
 
@@ -49,11 +51,44 @@ odoo-env/
 
 ### `scripts/odoo-env`
 
-Main entry point. Reads `odoo-env.toml`, ensures bare repos and worktrees exist, then either launches a subshell or prints env vars. If a bare repo is missing, it is cloned automatically (no need to run a separate setup script).
+Main entry point. Reads `odoo-env.toml`, ensures bare repos and worktrees exist, then either launches a subshell or prints env vars. If a bare repo is missing, it is cloned automatically (no need to run a separate setup script). Also regenerates `odools.toml` on each run.
 
 **Options:** `--list`, `--port`, `--setup-only`, `--odoorc`, `--print-env`
 
 `--odoorc` regenerates `.cache/envs/{name}/odoorc` from current `odoo-env.toml` settings without fetching, creating worktrees, or launching a shell. Useful after editing port or odoorc settings.
+
+**Subcommands:**
+
+```bash
+odoo-env status [env]                    # Show git status (ahead/behind/dirty) for all worktrees
+odoo-env sync [env]                      # Fetch + rebase worktrees onto upstream
+odoo-env cleanup [env] [--delete-branches] # Remove worktrees (refuses if dirty)
+```
+
+Omitting `[env]` targets all environments.
+
+### `scripts/odoo-shell-aliases.sh` / `odoo-shell-aliases.fish`
+
+Shell functions for daily Odoo dev work. Add to your shell rc file:
+
+```bash
+# bash/zsh (~/.bashrc or ~/.zshrc)
+source /path/to/odoo-env/scripts/odoo-shell-aliases.sh
+
+# fish (~/.config/fish/config.fish)
+source /path/to/odoo-env/scripts/odoo-shell-aliases.fish
+```
+
+| Function | Action |
+|---|---|
+| `oo [args]` | Start Odoo (`odoo-bin -c $ODOO_RC`) |
+| `otest [args]` | Run tests (`--test-enable --stop-after-init`) |
+| `ocd` | `cd $ODOO_PATH` |
+| `ocd-e` | `cd $ODOO_ENTERPRISE_PATH` |
+| `ogit [args]` | `git -C $ODOO_PATH` |
+| `olog` | `tail -f` the configured logfile |
+| `odb [dbname]` | `psql` with DB settings from `$ODOO_RC` |
+| `oenv` | Print current environment summary |
 
 
 ## Dev services (optional)
@@ -119,16 +154,60 @@ npm install -g rtlcss
 | `ODOO_VERSION`         | Base branch (e.g. `master`, `18.0`)          |
 | `ODOO_RC`              | Path to `.cache/envs/{name}/odoorc`          |
 | `ODOO_PATH`            | Path to community worktree                   |
-| `ODOO_ENTERPRISE_PATH` | Path to enterprise worktree                  |
+| `ODOO_ENTERPRISE_PATH` | Path to enterprise worktree (empty if none)  |
+| `ODOO_EXTRA_PATHS`     | Colon-separated paths of custom repos        |
 | `ODOO_ADDONS_PATH`     | Comma-separated addons paths                 |
 | `PYTHONPATH`           | Includes community worktree root             |
 | `ODOO_PORT`            | Port (default: 8069)                         |
 
 ## Notes
 
-- `src/`, `.cache/`, `odoo-env.toml` are gitignored — never commit them
-- `.notes/` is gitignored except `.gitkeep`
+- `src/`, `.cache/`, `odoo-env.toml`, `odools.toml` are gitignored — never commit them
+- `.notes/` is gitignored except `.gitkeep`; same pattern for `src/` with `src/.gitkeep`
 - `.claude/` is gitignored (local Claude Code settings)
 - The Python venv at `.venv/` is managed by mise automatically
 - `install-wkhtmltopdf` is intentionally kept as bash (Debian/apt-specific)
-- Worktrees are created in detached HEAD state from `origin/{branch}`
+- Worktrees are created on a local tracking branch (not detached HEAD)
+- `odools.toml` is auto-generated on each `odoo-env <env>` run for the Odoo LSP
+
+## Custom repos
+
+To use non-odoo repositories, declare their URL in `[env.repos]`:
+
+```toml
+[my-client.branches]
+community = "17.0"
+enterprise = "17.0"
+my-addons = "main"
+
+[my-client.repos]
+my-addons = "git@github.com:myclient/odoo-addons.git"
+```
+
+Global repos (available in all envs) go in `[_.repos]`:
+
+```toml
+[_.repos]
+utils = "git@github.com:mycompany/odoo-utils.git"
+[_.branches]
+utils = "main"
+```
+
+Standard Odoo repos (`community`, `enterprise`, `design-themes`, `industry`, `upgrade`, `util`) do not need a URL — they default to `git@github.com:odoo/{alias}.git`.
+
+## odools.toml reference (pre-generation format)
+
+```toml
+[[config]]
+name = "Odoo Dev"
+odoo_path = "/abs/path/src/community/master"
+addons_paths = [
+    "/abs/path/src/community/master/addons",
+    "/abs/path/src/community/master/odoo/addons",
+    "/abs/path/src/enterprise/master",
+]
+python_path = "/abs/path/.venv/bin/python3"
+```
+
+VSCode users can also point to an alternative config file:
+`"Odoo.serverConfigPath": "/path/to/odoo-env/odools.toml"`
