@@ -68,7 +68,7 @@ odoo-env my-project --setup-only
 
 Each environment has a name you choose freely (e.g. `my-project`, `fix-invoice`, `review-pr-42`).
 The first time you use a name, an interactive wizard asks for the branches and port.
-Settings are saved to `.cache/envs/<name>.json` and reused on subsequent runs.
+Settings are saved to `.cache/envs/<name>.toml` and reused on subsequent runs.
 
 ### Examples
 
@@ -139,7 +139,7 @@ sets `ODOO_RC` automatically — no need to pass `--config` manually.
 odoo-env/
 ├── .cache/               # Gitignored runtime data
 │   ├── git/              # Bare repositories
-│   ├── envs/             # Saved environment settings (JSON)
+│   ├── envs/             # Saved environment settings (TOML)
 │   ├── postgres-data/    # Postgres volume
 │   └── sessions/{name}/odoo.conf  # Generated merged config
 ├── src/                  # Worktrees (gitignored)
