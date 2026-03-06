@@ -27,7 +27,7 @@ mise activate fish | source
 
 Once active, entering this repo automatically:
 - Activates the Python venv (`.venv/`)
-- Adds `scripts/` to `$PATH` (so `odoo-env` and `setup-odoo-repository` work directly)
+- Adds `scripts/` to `$PATH` (so `odoo-env` works directly)
 
 ### Mise Setup
 
@@ -56,55 +56,46 @@ install-wkhtmltopdf
 
 ### Odoo Setup
 ```bash
-# Initialize bare repositories
-setup-odoo-repository odoo
-setup-odoo-repository enterprise
+# Declare your environments
+cp odoo-env.toml.example odoo-env.toml
+# Edit odoo-env.toml to set your branches and Odoo conf settings
 
-# Create worktrees (wizard runs on first use; suggests how to install Python deps at the end)
+# Create worktrees (suggests how to install Python deps at the end)
 odoo-env my-project --setup-only
 ```
 
 ## Usage
 
-Each environment has a name you choose freely (e.g. `my-project`, `fix-invoice`, `review-pr-42`).
-The first time you use a name, an interactive wizard asks for the branches and port.
-Settings are saved to `.cache/envs/<name>.toml` and reused on subsequent runs.
+Environments are declared in `odoo-env.toml` at the repo root (gitignored).
+Copy `odoo-env.toml.example` to get started and edit it to define your environments.
 
 ### Examples
 
 ```bash
-# First use: wizard runs, then launches shell
-odoo-env my-project
-
-# Subsequent uses: loads saved settings immediately
-odoo-env my-project
-
-# Re-run the wizard to change branches or port
-odoo-env my-project --reconfigure
-
-# List all configured environments
+# List all environments from odoo-env.toml
 odoo-env --list
+
+# Set up worktrees and launch a shell
+odoo-env my-project
+
+# Set up worktrees without launching a shell
+odoo-env my-project --setup-only
+
+# Regenerate odoorc from current settings (no shell)
+odoo-env my-project --odoorc
 
 # Print env vars only (useful for eval)
 eval "$(odoo-env my-project --print-env)"
 ```
 
-### Interactive wizard
-
-When creating a new environment, the wizard asks:
-
-1. **Base Odoo branch** — e.g. `master`, `18.0`, `17.0`
-2. **Branch per extra repo** — per repo found in `.cache/git/`, defaults to the base branch
-3. **HTTP port** — defaults to `8069`
-
 ### Options
 
 | Flag | Description |
 |------|-------------|
-| `--list` | List all configured environments |
-| `--reconfigure` | Re-run the interactive setup wizard |
-| `--port PORT` | Override HTTP port for this run (not saved) |
+| `--list` | List all environments from odoo-env.toml |
+| `--port PORT` | Override HTTP port for this run |
 | `--setup-only` | Create worktrees without launching a shell |
+| `--odoorc` | Regenerate `.cache/envs/{name}/odoorc` from current settings, no shell |
 | `--print-env` | Print `export` statements instead of launching a shell |
 
 ## Dev services (optional)
@@ -123,15 +114,15 @@ mise run services-down  # stop all
 | Mailpit | `localhost:8025` | Mail catcher UI (SMTP on 1025) |
 | pgweb | `localhost:8081` | Browser-based DB client |
 
-If you have your own Postgres, skip `mise run services` and create
-`config/odoo.local.conf` to override the DB connection settings
-(see `config/odoo.local.conf.example`).
+If you have your own Postgres, skip `mise run services` and set DB connection
+settings in `odoo-env.toml` under `[env.odoorc]` or globally under `[_.odoorc]`.
 
 ## Odoo configuration
 
-`config/odoo.conf` is committed with base settings pointing to the compose
-stack. `odoo-env` merges it with `config/odoo.local.conf` (if present) and
-sets `ODOO_RC` automatically — no need to pass `--config` manually.
+`odoo-env.toml` (gitignored) declares environments and Odoo conf settings.
+`[_.odoorc]` holds global defaults; `[env.odoorc]` holds per-environment overrides.
+`odoo-env` merges these and sets `ODOO_RC` automatically — no need to pass
+`--config` manually.
 
 ## Structure
 
@@ -139,20 +130,17 @@ sets `ODOO_RC` automatically — no need to pass `--config` manually.
 odoo-env/
 ├── .cache/               # Gitignored runtime data
 │   ├── git/              # Bare repositories
-│   ├── envs/             # Saved environment settings (TOML)
 │   ├── postgres-data/    # Postgres volume
-│   └── sessions/{name}/odoo.conf  # Generated merged config
+│   └── envs/{name}/odoorc         # Generated merged config
 ├── src/                  # Worktrees (gitignored)
 │   ├── community/{branch}/
 │   └── enterprise/{branch}/
-├── config/
-│   ├── odoo.conf
-│   └── odoo.local.conf.example
 ├── scripts/              # Auto-added to $PATH by mise
 │   ├── odoo-env
-│   ├── setup-odoo-repository
 │   └── install-wkhtmltopdf
 ├── compose.yml
 ├── mise.toml
+├── odoo-env.toml         # Gitignored — copy from .example
+├── odoo-env.toml.example
 └── odools.toml
 ```

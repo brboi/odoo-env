@@ -1,13 +1,13 @@
-# Cache et données locales
+# Cache and local data
 .cache/
 .data/
 .venv/
 
-# Notes personnelles (sauf .gitkeep)
-.personal-notes/*
-!.personal-notes/.gitkeep
+# Personal notes (except .gitkeep)
+.notes/*
+!.notes/.gitkeep
 
-# Sources Odoo (worktrees)
+# Odoo sources (worktrees)
 src/
 
 # Python
@@ -21,5 +21,6 @@ __pycache__/
 # Claude Code local settings
 .claude/
 
-# Local Odoo config overrides
-config/odoo.local.conf
+# Local configuration overrides
+odoo-env.toml
+mise.local.toml

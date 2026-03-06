@@ -1,78 +1,60 @@
-"""Tests for settings persistence: TOML I/O, list_envs, detect_available_repos."""
+"""Tests for odoo-env.toml loading: list_envs, get_env."""
 import pytest
 
 
-class TestSaveLoadRoundtrip:
-    def test_roundtrip(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "ENVS_DIR", tmp_path)
-
-        settings = {"community": "18.0", "enterprise": "18.0-fix", "port": 8069}
-        mod.save_env_settings("my-project", settings)
-        loaded = mod.load_env_settings("my-project")
-
-        assert loaded == settings
-
-    def test_load_missing_returns_none(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "ENVS_DIR", tmp_path)
-
-        assert mod.load_env_settings("nonexistent") is None
-
-    def test_toml_file_is_human_readable(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "ENVS_DIR", tmp_path)
-
-        mod.save_env_settings("dev", {"community": "master", "port": 8069})
-        content = (tmp_path / "dev.toml").read_text()
-
-        assert 'community = "master"' in content
-        assert "port = 8069" in content
-
-
 class TestListEnvs:
-    def test_empty_when_dir_missing(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "ENVS_DIR", tmp_path / "nonexistent")
+    def test_excludes_reserved_key(self, mod):
+        toml_data = {"_": {"odoorc": {}}, "my-env": {"branches": {"community": "master"}}}
+        assert "_" not in mod.list_envs(toml_data)
 
-        assert mod.list_envs() == []
+    def test_returns_sorted_names(self, mod):
+        toml_data = {
+            "zebra": {"branches": {"community": "master"}},
+            "alpha": {"branches": {"community": "18.0"}},
+            "my-project": {"branches": {"community": "17.0"}},
+        }
+        assert mod.list_envs(toml_data) == ["alpha", "my-project", "zebra"]
 
-    def test_returns_sorted_names(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "ENVS_DIR", tmp_path)
-        for name in ("zebra", "alpha", "my-project"):
-            (tmp_path / f"{name}.toml").write_text('community = "master"\nport = 8069\n')
+    def test_empty_dict_returns_empty_list(self, mod):
+        assert mod.list_envs({}) == []
 
-        assert mod.list_envs() == ["alpha", "my-project", "zebra"]
-
-    def test_ignores_non_toml_files(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "ENVS_DIR", tmp_path)
-        (tmp_path / "env.toml").write_text('community = "master"\nport = 8069\n')
-        (tmp_path / "README.md").write_text("ignored")
-        (tmp_path / "env.json").write_text("{}")
-
-        assert mod.list_envs() == ["env"]
+    def test_only_reserved_key_returns_empty(self, mod):
+        assert mod.list_envs({"_": {"odoorc": {}}}) == []
 
 
-class TestDetectAvailableRepos:
-    def test_no_cache_dir_returns_community(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "nonexistent")
+class TestGetEnv:
+    def test_found_env_returns_dict(self, mod):
+        toml_data = {"my-env": {"branches": {"community": "master"}}}
+        result = mod.get_env(toml_data, "my-env")
+        assert result == {"branches": {"community": "master"}}
 
-        assert mod.detect_available_repos() == ["community"]
+    def test_missing_env_raises_system_exit(self, mod):
+        with pytest.raises(SystemExit):
+            mod.get_env({"other": {"branches": {"community": "master"}}}, "nonexistent")
 
-    def test_community_comes_first(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "CACHE_DIR", tmp_path)
-        for repo in ("enterprise", "community", "design-themes"):
-            (tmp_path / f"{repo}.git").mkdir()
+    def test_reserved_name_raises_system_exit(self, mod):
+        with pytest.raises(SystemExit):
+            mod.get_env({"_": {"odoorc": {}}}, "_")
 
-        repos = mod.detect_available_repos()
-        assert repos[0] == "community"
-        assert set(repos) == {"community", "enterprise", "design-themes"}
+    def test_env_without_branches_and_no_defaults_raises(self, mod):
+        toml_data = {"my-env": {"odoorc": {"port": 8069}}}
+        with pytest.raises(SystemExit):
+            mod.get_env(toml_data, "my-env")
 
-    def test_empty_cache_returns_community(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "CACHE_DIR", tmp_path)
+    def test_env_without_branches_but_default_branches_ok(self, mod):
+        toml_data = {
+            "_": {"branches": {"upgrade": "master"}},
+            "my-env": {"odoorc": {"port": 8069}},
+        }
+        # No branches in env but _.branches has content — should not raise
+        result = mod.get_env(toml_data, "my-env")
+        assert result == {"odoorc": {"port": 8069}}
 
-        assert mod.detect_available_repos() == ["community"]
-
-    def test_only_directories_counted(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "CACHE_DIR", tmp_path)
-        (tmp_path / "community.git").mkdir()
-        (tmp_path / "stale.git").write_text("not a dir")  # file, should be ignored
-
-        repos = mod.detect_available_repos()
-        assert "stale" not in repos
+    def test_env_branches_override_defaults(self, mod):
+        """Caller merges branches; get_env just validates and returns raw section."""
+        toml_data = {
+            "_": {"branches": {"upgrade": "master", "community": "17.0"}},
+            "my-env": {"branches": {"community": "18.0"}},
+        }
+        result = mod.get_env(toml_data, "my-env")
+        assert result["branches"]["community"] == "18.0"

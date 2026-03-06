@@ -1,0 +1,33 @@
+# odoo-env.toml — copy to odoo-env.toml and customize (this file is gitignored)
+#
+#   cp odoo-env.toml.example odoo-env.toml
+#
+# [_.odoorc]        global Odoo conf defaults applied to all environments
+# [_.branches]      global branch defaults merged into every environment
+# [env.branches]    repo → branch mapping (community is required; env-specific wins over defaults)
+# [env.odoorc]      per-env Odoo conf overrides — optional
+
+[_.odoorc]
+admin_password = "Password"
+db_host = "postgres"
+db_port = 5432
+db_user = "odoo"
+db_password = "odoo"
+db_template = "template0"
+smtp_server = "mailpit"
+smtp_port = 1025
+
+[my-main.branches]
+community = "master"
+enterprise = "master-fix"
+
+[my-main.odoorc]
+port = 8070
+
+[my-other.branches]
+community = "18.0"
+enterprise = "18.0-fix"
+
+[my-other.odoorc]
+port = 8069
+db_name = "mydb"
