@@ -98,6 +98,49 @@ eval "$(odoo-env my-project --print-env)"
 | `--odoorc` | Regenerate `.cache/envs/{name}/odoorc` from current settings, no shell |
 | `--print-env` | Print `export` statements instead of launching a shell |
 
+## Git workflow with worktrees
+
+Each branch lives in its own directory — no `git checkout` to switch context.
+All worktrees share the same bare repo, so fetching from one updates refs for all.
+
+### Start a feature
+
+```bash
+cd src/community/master
+git fetch -p
+git worktree add ../master-fix -b master-fix origin/master
+
+cd ../master-fix
+# ... edit code ...
+git add .
+git commit -m "[FIX] web: a great fix"
+git push -u dev HEAD
+```
+
+### Rebase on updated master
+
+```bash
+cd src/community/master-fix  # or launch via odoo-env
+git fetch -p
+git rebase origin/master             # detached HEAD — use origin/master, not master
+git push --force-with-lease
+```
+
+### Fixup + autosquash
+
+```bash
+git commit --fixup=123abce
+git rebase -i @~3 --autosquash
+```
+
+### Clean up after merge
+
+```bash
+git worktree remove src/community/master-fix
+```
+
+> `src/enterprise/` follows the same pattern.
+
 ## Dev services (optional)
 
 `compose.yml` provides Postgres+pgvector, a mail catcher, and a browser DB client.
