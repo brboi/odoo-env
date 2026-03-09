@@ -44,6 +44,11 @@ BLUE = "\033[0;34m"
 NC = "\033[0m"
 
 
+def hyperlink(text: str, url: str) -> str:
+    """Wrap text as an OSC 8 terminal hyperlink (ctrl-click in most modern terminals)."""
+    return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
+
+
 def log_info(msg: str) -> None:
     print(f"{BLUE}[INFO]{NC} {msg}", file=sys.stderr)
 
@@ -93,6 +98,54 @@ def stable_base(branch: str) -> str | None:
     if m:
         return m.group(1)
     return None
+
+
+RUNBOT_BASE_URL = "https://runbot.odoo.com"
+
+
+def deduce_runbot_bundles(repo_branches: dict[str, str], resolved_pr_branches: dict[str, str] | None = None) -> list[str]:
+    """Deduce runbot bundle name(s) from a repo→branch mapping.
+
+    Returns a list of candidate bundle names (usually one).
+    - Feature branches (master-fix, 18.0-fix) → bundle name = branch name
+    - PR specs → resolved to actual branch via resolved_pr_branches mapping
+    - If all branches are stable (master, 18.0) → returns the stable version
+
+    resolved_pr_branches: optional {pr_spec: resolved_branch_name} for PR branches.
+    Multiple different candidates are returned as-is; caller decides how to display.
+    """
+    candidates: list[str] = []
+    stable_version: str | None = None
+
+    for repo, branch in repo_branches.items():
+        pr_spec = parse_pr(branch)
+        if pr_spec:
+            resolved = (resolved_pr_branches or {}).get(branch)
+            if resolved and stable_base(resolved) is not None:
+                # resolved PR branch is a feature branch
+                if resolved not in candidates:
+                    candidates.append(resolved)
+            # unresolved PR: skip (can't determine bundle name)
+            continue
+
+        base = stable_base(branch)
+        if base is None:
+            # This is a stable branch (master, 18.0, etc.)
+            if stable_version is None:
+                stable_version = branch
+        else:
+            # Feature branch
+            if branch not in candidates:
+                candidates.append(branch)
+
+    if not candidates and stable_version:
+        return [stable_version]
+    return candidates
+
+
+def runbot_bundle_urls(bundles: list[str]) -> list[str]:
+    """Return runbot URLs for a list of bundle names."""
+    return [f"{RUNBOT_BASE_URL}/runbot/bundle/{b}" for b in bundles]
 
 
 def parse_pr(branch: str) -> dict | None:
@@ -400,6 +453,10 @@ def build_odoo_conf(root_dir: Path, addons_path: str, port: int, name: str, defa
     cfg["options"]["addons_path"] = addons_path
     cfg["options"]["http_port"] = str(port)
 
+    # Default db_name to env name if not explicitly set in defaults or overrides
+    if "db_name" not in cfg["options"]:
+        cfg["options"]["db_name"] = name
+
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
         cfg.write(f)
@@ -561,6 +618,20 @@ def _worktree_paths_for_env(toml_data: dict, env_name: str) -> dict[str, Path] |
 
 # --- Subcommands ---
 
+def fetch_pr_title(org_repo: str, pr_number: str) -> str | None:
+    """Fetch PR title using the gh CLI. Returns None if unavailable or on error."""
+    if not shutil.which("gh"):
+        return None
+    result = subprocess.run(
+        ["gh", "pr", "view", pr_number, "--repo", org_repo, "--json", "title", "-q", ".title"],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return result.stdout.decode().strip() or None
+    return None
+
+
 def github_pr_url(bare_path: Path, pr_spec: dict) -> str | None:
     """Return the GitHub PR URL for a given PR spec dict."""
     number = pr_spec["number"]
@@ -580,11 +651,33 @@ def github_pr_url(bare_path: Path, pr_spec: dict) -> str | None:
     return None
 
 
+def _pr_annotation(bare_path: Path, pr_spec: dict) -> str:
+    """Return a string with PR title (if fetchable) and URL for display in status."""
+    url = github_pr_url(bare_path, pr_spec)
+    if not url:
+        return ""
+    org_repo = pr_spec.get("github_org_repo")
+    if not org_repo:
+        # Origin PR: derive org/repo from remote URL
+        result = git(bare_path, "remote", "get-url", "origin", check=False, capture=True)
+        if result.returncode == 0:
+            m = re.match(r'git@github\.com:(.+?)(?:\.git)?$', result.stdout.decode().strip())
+            if m:
+                org_repo = m.group(1)
+    title = fetch_pr_title(org_repo, pr_spec["number"]) if org_repo else None
+    if title:
+        return f"  {BLUE}{hyperlink(title, url)}{NC}"
+    return f"  {BLUE}{hyperlink(url, url)}{NC}"
+
+
 def cmd_status(env_names: list[str], toml_data: dict) -> None:
     """Show git status (branch, ahead/behind, dirty) for each worktree."""
     for env_name in env_names:
         print(f"\n{BLUE}{env_name}{NC}")
         repo_branches = _repo_branches_for_env(toml_data, env_name)
+
+        # Collect resolved PR branches for runbot bundle deduction
+        resolved_pr_branches: dict[str, str] = {}
 
         for repo, branch in repo_branches.items():
             branch_dir = branch_to_dir(branch)
@@ -592,13 +685,11 @@ def cmd_status(env_names: list[str], toml_data: dict) -> None:
             pr_spec = parse_pr(branch)
 
             if not worktree_path.is_dir():
-                pr_str = ""
+                annotation = ""
                 if pr_spec:
                     bare_path = CACHE_DIR / f"{repo}.git"
-                    url = github_pr_url(bare_path, pr_spec)
-                    if url:
-                        pr_str = f"  {BLUE}{url}{NC}"
-                print(f"  {YELLOW}{repo}@{branch}{NC}  [not created]{pr_str}")
+                    annotation = _pr_annotation(bare_path, pr_spec)
+                print(f"  {YELLOW}{repo}@{branch}{NC}  [not created]{annotation}")
                 continue
 
             head = git_wt(worktree_path, "symbolic-ref", "--short", "HEAD", check=False, capture=True)
@@ -615,14 +706,19 @@ def cmd_status(env_names: list[str], toml_data: dict) -> None:
             dirty = git_wt(worktree_path, "status", "--porcelain", check=False, capture=True)
             dirty_str = f"  {RED}*dirty*{NC}" if dirty.stdout.decode().strip() else ""
 
-            pr_str = ""
+            annotation = ""
             if pr_spec:
                 bare_path = CACHE_DIR / f"{repo}.git"
-                url = github_pr_url(bare_path, pr_spec)
-                if url:
-                    pr_str = f"  {BLUE}{url}{NC}"
+                annotation = _pr_annotation(bare_path, pr_spec)
+                # Resolve actual branch name for runbot bundle deduction
+                resolved_pr_branches[branch] = current_branch
 
-            print(f"  {GREEN}{repo}{NC}@{current_branch}  {ab_str}{dirty_str}{pr_str}")
+            print(f"  {GREEN}{repo}{NC}@{current_branch}  {ab_str}{dirty_str}{annotation}")
+
+        # Show runbot bundle links
+        bundles = deduce_runbot_bundles(repo_branches, resolved_pr_branches)
+        for bundle, url in zip(bundles, runbot_bundle_urls(bundles)):
+            print(f"  {BLUE}{hyperlink('runbot: ' + bundle, url)}{NC}")
 
 
 def cmd_rebase(env_names: list[str], toml_data: dict) -> None:

@@ -8,13 +8,14 @@
 # [env.branches]    repo → branch mapping (community is required; env-specific wins over defaults)
 # [env.odoorc]      per-env Odoo conf overrides — optional
 # [env.repos]       custom repo URLs for non-odoo repos (alias → git URL)
+#
+# db_name defaults to the environment name — no need to set it explicitly.
 
 [_.odoorc]
 port = 8069
 admin_passwd = "Password"
 server_wide_modules = "base,web"
 data_dir = ".cache/odoo"
-db_name = "odoo"
 db_host = "postgres"
 db_port = 5432
 db_user = "odoo"
@@ -22,9 +23,6 @@ db_password = "odoo"
 db_template = "template0"
 smtp_server = "mailpit"
 smtp_port = 1025
-
-[master.odoorc]
-db_name = "master"
 
 [master.branches]
 community = "master"
@@ -41,9 +39,9 @@ port = 8070
 community = "18.0"
 enterprise = "18.0-fix"
 
-[my-other.odoorc]
-port = 8069
-db_name = "mydb"
+# Custom db_name (overrides the auto-derived env name):
+# [my-other.odoorc]
+# db_name = "mydb"
 
 # Custom (non-odoo) repos: declare URL here, reference branch in [env.branches]
 # [my-client.branches]
@@ -60,7 +58,7 @@ db_name = "mydb"
 # [_.branches]
 # utils = "main"
 
-# Skip JS tooling (jsconfig.json, package.json, node_modules symlink) for specific repos
+# Skip JS tooling (jsconfig.json, package.json, node_modules symlink) for specific repos.
 # Useful when the repo doesn't gitignore these files and you can't modify it.
 # Per-env or global defaults:
 # [my-client.options]
