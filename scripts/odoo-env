@@ -772,8 +772,9 @@ def main() -> None:
 
     defaults = toml_data.get("_", {}).get("odoorc", {})
     odoorc_overrides = env_section.get("odoorc", {})
+    global_options = toml_data.get("_", {}).get("options", {})
     env_options = env_section.get("options", {})
-    skip_js_tooling: set[str] = set(env_options.get("skip_js_tooling", []))
+    skip_js_tooling: set[str] = set(global_options.get("skip_js_tooling", [])) | set(env_options.get("skip_js_tooling", []))
 
     # Port: env odoorc → global default → fallback 8069; CLI flag overrides all
     port = args.port if args.port is not None else int(odoorc_overrides.get("port", defaults.get("port", 8069)))

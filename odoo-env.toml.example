@@ -62,8 +62,12 @@ db_name = "mydb"
 
 # Skip JS tooling (jsconfig.json, package.json, node_modules symlink) for specific repos
 # Useful when the repo doesn't gitignore these files and you can't modify it.
+# Per-env or global defaults:
 # [my-client.options]
 # skip_js_tooling = ["my-custom-repo"]
+#
+# [_.options]
+# skip_js_tooling = ["my-custom-repo"]  # applied to all envs; merged with per-env list
 
 # PR branch formats — three equivalent ways to reference a GitHub PR:
 #
