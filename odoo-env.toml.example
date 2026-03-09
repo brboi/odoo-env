@@ -10,7 +10,7 @@
 # [env.repos]       custom repo URLs for non-odoo repos (alias → git URL)
 
 [_.odoorc]
-admin_password = "Password"
+admin_passwd = "Password"
 db_host = "postgres"
 db_port = 5432
 db_user = "odoo"
