@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
 """odoo-env: Configure and launch an Odoo development environment.
 
 Usage:
@@ -22,6 +23,11 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+try:
+    import argcomplete
+except ImportError:
+    argcomplete = None
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CACHE_DIR = ROOT_DIR / ".cache" / "git"
@@ -832,6 +838,19 @@ def cmd_activate(name: str, toml_data: dict) -> None:
     os.execv(shell, [shell, "-i"])
 
 
+def env_completer(prefix, **kwargs):
+    """Return env names from odoo-env.toml matching prefix (for argcomplete)."""
+    toml_path = ROOT_DIR / "odoo-env.toml"
+    if not toml_path.exists():
+        return []
+    try:
+        with open(toml_path, "rb") as f:
+            data = tomllib.load(f)
+        return [k for k in data if k != "_" and k.startswith(prefix)]
+    except Exception:
+        return []
+
+
 def main() -> None:
     SUBCOMMANDS = {"list", "activate", "status", "rebase", "remove"}
 
@@ -849,14 +868,17 @@ def main() -> None:
     subparsers.add_parser("list", help="List environments from odoo-env.toml")
 
     sp_activate = subparsers.add_parser("activate", help="Set up worktrees and launch shell")
-    sp_activate.add_argument("env_name", help="Environment name")
+    sp_activate.add_argument("env_name", help="Environment name").completer = env_completer
 
     subparsers.add_parser("status", help="Show git status of worktrees (current env, or all)")
 
     subparsers.add_parser("rebase", help="Fetch and rebase worktrees onto upstream (current env, or all)")
 
     sp_remove = subparsers.add_parser("remove", help="Remove worktrees for an environment")
-    sp_remove.add_argument("env_name", help="Environment name")
+    sp_remove.add_argument("env_name", help="Environment name").completer = env_completer
+
+    if argcomplete:
+        argcomplete.autocomplete(parser)
 
     args = parser.parse_args()
 
