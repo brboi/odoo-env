@@ -59,9 +59,6 @@ install-wkhtmltopdf
 # Declare your environments
 cp odoo-env.toml.example odoo-env.toml
 # Edit odoo-env.toml to set your branches and Odoo conf settings
-
-# Create worktrees (suggests how to install Python deps at the end)
-odoo-env my-project --setup-only
 ```
 
 ## Usage
@@ -69,34 +66,19 @@ odoo-env my-project --setup-only
 Environments are declared in `odoo-env.toml` at the repo root (gitignored).
 Copy `odoo-env.toml.example` to get started and edit it to define your environments.
 
-### Examples
+### Commands
 
-```bash
-# List all environments from odoo-env.toml
-odoo-env --list
+| Command | Description |
+|---------|-------------|
+| `odoo-env list` | List all environments from odoo-env.toml |
+| `odoo-env activate <env>` | Set up worktrees and launch a shell |
+| `odoo-env <env>` | Shorthand for `activate` |
+| `odoo-env status` | Git status of worktrees (current env, or all) |
+| `odoo-env rebase` | Fetch + rebase worktrees onto upstream (current env, or all) |
+| `odoo-env remove <env>` | Remove worktrees for an environment |
 
-# Set up worktrees and launch a shell
-odoo-env my-project
-
-# Set up worktrees without launching a shell
-odoo-env my-project --setup-only
-
-# Regenerate odoorc from current settings (no shell)
-odoo-env my-project --odoorc
-
-# Print env vars only (useful for eval)
-eval "$(odoo-env my-project --print-env)"
-```
-
-### Options
-
-| Flag | Description |
-|------|-------------|
-| `--list` | List all environments from odoo-env.toml |
-| `--port PORT` | Override HTTP port for this run |
-| `--setup-only` | Create worktrees without launching a shell |
-| `--odoorc` | Regenerate `.cache/envs/{name}/odoorc` from current settings, no shell |
-| `--print-env` | Print `export` statements instead of launching a shell |
+`status` and `rebase` use the current active environment (detected via `$ODOO_ENV_NAME`)
+when run inside an active shell, and operate on all environments otherwise.
 
 ## Git workflow with worktrees
 
@@ -136,8 +118,11 @@ git rebase -i @~3 --autosquash
 ### Clean up after merge
 
 ```bash
-git worktree remove src/community/master-fix
+odoo-env remove my-project
 ```
+
+This removes worktrees and deletes local feature branches automatically (unless another
+environment in `odoo-env.toml` uses the same branch).
 
 > `src/enterprise/` follows the same pattern.
 
