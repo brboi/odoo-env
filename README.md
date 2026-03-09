@@ -140,23 +140,64 @@ environment in `odoo-env.toml` uses the same branch).
 
 > `src/enterprise/` follows the same pattern.
 
-## VSCode
+## IDE Workspaces
 
-Copy the provided example settings on first clone:
+Running `odoo-env activate <env>` automatically generates workspace configuration files for
+VS Code, Zed, and JetBrains (PyCharm/IntelliJ) in `.cache/envs/<env>/`.
+Configs are regenerated on every `activate` run.
+
+### VS Code
+
+A `.code-workspace` file is generated at `.cache/envs/<env>/<env>.code-workspace`.
+Open it directly from the terminal link shown after activation, or run:
+
+```bash
+code .cache/envs/<env>/<env>.code-workspace
+```
+
+The workspace configures:
+
+- **Folders** scoped to each worktree (community, enterprise, custom repos)
+- **Python interpreter** pointing to `.venv/bin/python3`
+- **Ctrl+P (Quick Open)** finds files across all worktrees (`search.useIgnoreFiles: false`)
+- **Heavy directories excluded** from indexing: `__pycache__`, `*.pyc`, `node_modules`
+- **Odoo LSP** profile pre-selected (`Odoo.selectedConfiguration`)
+- **Debug launch config** to start Odoo with debugpy using the generated `odoorc`
+- **Integrated terminal** pre-loaded with `$ODOO_RC`, `$PYTHONPATH`, `$ODOO_PATH`, etc.
+
+For the repo-level VS Code settings, copy the provided example on first clone:
 
 ```bash
 cp .vscode/settings.json.example .vscode/settings.json
 ```
 
-This configures:
+`.vscode/settings.json` is gitignored so your local settings are never committed.
 
-- **Ctrl+P (Quick Open)** finds files inside `src/` even though `src/*` is in `.gitignore`
-  (`search.useIgnoreFiles: false`).
-- Heavy directories excluded from indexing: `.cache/`, `.venv/`, `__pycache__`, `*.pyc`,
-  `node_modules`.
+### Zed
 
-`.vscode/settings.json` is gitignored so your local settings (e.g. `Odoo.selectedProfile`
-set by the Odoo LSP extension) are never committed.
+Open the environment directory in Zed:
+
+```bash
+zed .cache/envs/<env>/
+```
+
+Zed workspace includes:
+
+- **Symlinks** to each worktree inside `.cache/envs/<env>/` (so Zed sees them as project roots)
+- **`.zed/settings.json`** with Pyright LSP config, terminal env vars, and file scan exclusions
+
+### JetBrains (PyCharm / IntelliJ)
+
+Open the environment directory in PyCharm:
+
+```bash
+pycharm .cache/envs/<env>/
+```
+
+A minimal `.idea/` project is generated with:
+
+- **Content roots** for each worktree with `node_modules` and `__pycache__` excluded
+- **Python SDK** configured to `Python 3.12 (odoo-env)` (set up the SDK once in PyCharm settings)
 
 ## Dev services (optional)
 
@@ -191,7 +232,11 @@ odoo-env/
 ├── .cache/               # Gitignored runtime data
 │   ├── git/              # Bare repositories
 │   ├── postgres-data/    # Postgres volume
-│   └── envs/{name}/odoorc         # Generated merged config
+│   └── envs/{name}/               # Generated per-environment files
+│       ├── odoorc                 # Merged Odoo config
+│       ├── {name}.code-workspace  # VS Code workspace
+│       ├── .zed/settings.json     # Zed project settings
+│       └── .idea/                 # JetBrains project
 ├── src/                  # Worktrees (gitignored)
 │   ├── community/{branch}/
 │   └── enterprise/{branch}/
