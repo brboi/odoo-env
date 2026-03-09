@@ -834,6 +834,7 @@ def main() -> None:
         if r not in ("community", "enterprise")
     )
     env = {
+        "ODOO_ENV_NAME": name,
         "ODOO_VERSION": odoo_version,
         "ODOO_RC": str(odoo_conf),
         "PYTHONPATH": python_path + (":" + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else ""),
@@ -881,11 +882,14 @@ def main() -> None:
 
     # Launch subshell — update process environment then exec
     os.environ.update(env)
-    os.environ["PS1"] = f"(odoo:{name}) " + os.environ.get("PS1", "$ ")
 
-    shell = os.environ.get("SHELL", "/bin/sh")
+    # Detect the actual running shell from the parent process (more reliable than $SHELL)
+    try:
+        shell = os.readlink(f"/proc/{os.getppid()}/exe")
+    except OSError:
+        shell = os.environ.get("SHELL", "/bin/sh")
     log_info("Launching subshell (exit to return)...")
-    os.execv(shell, [shell])
+    os.execv(shell, [shell, "-i"])
 
 
 if __name__ == "__main__":

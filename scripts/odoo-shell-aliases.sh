@@ -91,3 +91,12 @@ oenv() {
     [ -n "$ODOO_ENTERPRISE_PATH" ] && echo "ODOO_ENTERPRISE_PATH: $ODOO_ENTERPRISE_PATH"
     [ -n "$ODOO_EXTRA_PATHS" ] && echo "ODOO_EXTRA_PATHS: $ODOO_EXTRA_PATHS"
 }
+
+# Show odoo-env indicator in shell prompt
+if [ -n "$ODOO_ENV_NAME" ]; then
+    if [ -n "$ZSH_VERSION" ]; then
+        PROMPT="(odoo:${ODOO_ENV_NAME}) ${PROMPT}"
+    else
+        PS1="(odoo:${ODOO_ENV_NAME}) ${PS1}"
+    fi
+fi
