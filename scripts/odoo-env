@@ -99,6 +99,66 @@ def stable_base(branch: str) -> str | None:
     return None
 
 
+def parse_pr(branch: str) -> dict | None:
+    """Parse a PR branch spec into a dict, or None if not a PR spec.
+
+    Supported formats:
+      pr/1261                                    → origin PR
+      odoo-dev/enterprise#1261                   → fork PR shorthand
+      https://github.com/odoo-dev/enterprise/pull/1261  → fork PR full URL
+    """
+    # Format 1: pr/NNNN (origin PR)
+    m = re.match(r'^pr/(\d+)$', branch)
+    if m:
+        number = m.group(1)
+        return {
+            "number": number,
+            "remote_url": None,
+            "github_org_repo": None,
+            "dir_slug": f"pr-{number}",
+        }
+
+    # Format 2: org/repo#NNNN (fork PR shorthand)
+    m = re.match(r'^([\w.-]+/[\w.-]+)#(\d+)$', branch)
+    if m:
+        org_repo = m.group(1)
+        number = m.group(2)
+        org = org_repo.split("/")[0]
+        return {
+            "number": number,
+            "remote_url": f"git@github.com:{org_repo}.git",
+            "github_org_repo": org_repo,
+            "dir_slug": f"{org}-pr-{number}",
+        }
+
+    # Format 3: https://github.com/org/repo/pull/NNNN (full GitHub URL)
+    m = re.match(r'^https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)$', branch)
+    if m:
+        org_repo = m.group(1)
+        number = m.group(2)
+        org = org_repo.split("/")[0]
+        return {
+            "number": number,
+            "remote_url": f"git@github.com:{org_repo}.git",
+            "github_org_repo": org_repo,
+            "dir_slug": f"{org}-pr-{number}",
+        }
+
+    return None
+
+
+def branch_to_dir(branch: str) -> str:
+    """Convert a branch name to a filesystem-safe directory name.
+
+    For PR specs, returns the canonical dir_slug (e.g. 'pr-1261', 'odoo-dev-pr-1261').
+    For regular branches, replaces '/' with '-'.
+    """
+    spec = parse_pr(branch)
+    if spec:
+        return spec["dir_slug"]
+    return branch.replace("/", "-")
+
+
 def remotes(bare_path: Path) -> list[str]:
     """Return remotes ordered: origin first, then others alphabetically."""
     result = git(bare_path, "remote", check=False, capture=True)
@@ -174,6 +234,52 @@ def local_branch_exists(bare_path: Path, branch: str) -> bool:
     return result.returncode == 0 and result.stdout.decode().strip() != ""
 
 
+def resolve_pr_branch(bare_path: Path, remote_name: str, pr_number: str) -> str:
+    """Find the actual head branch name for a PR by SHA lookup.
+
+    Returns the real branch name (e.g. '18.0-add-voip-telnyx-service-basm'),
+    or falls back to 'pr-{number}'.
+    """
+    result = git(bare_path, "rev-parse", f"{remote_name}/pr/{pr_number}", check=False, capture=True)
+    if result.returncode != 0:
+        return f"pr-{pr_number}"
+    sha = result.stdout.decode().strip()
+
+    result = git(bare_path, "for-each-ref",
+                 "--format=%(objectname) %(refname:short)",
+                 "refs/remotes/", check=False, capture=True)
+    if result.returncode != 0:
+        return f"pr-{pr_number}"
+
+    prefix = f"{remote_name}/"
+    for line in result.stdout.decode().splitlines():
+        parts = line.split(" ", 1)
+        if len(parts) != 2:
+            continue
+        ref_sha, refname = parts
+        if ref_sha == sha and "/pr/" not in refname and refname.startswith(prefix):
+            return refname[len(prefix):]
+
+    return f"pr-{pr_number}"
+
+
+def find_or_add_remote(bare_path: Path, url: str, preferred_name: str) -> str:
+    """Return the name of an existing remote with the given URL, or add one.
+
+    If a remote with `url` already exists, return its name.
+    Otherwise add `preferred_name` remote with a PR refspec and return it.
+    """
+    for remote_name in remotes(bare_path):
+        result = git(bare_path, "remote", "get-url", remote_name, check=False, capture=True)
+        if result.returncode == 0 and result.stdout.decode().strip() == url:
+            return remote_name
+
+    git(bare_path, "remote", "add", preferred_name, url)
+    git(bare_path, "config", "--add", f"remote.{preferred_name}.fetch",
+        f"+refs/pull/*/head:refs/remotes/{preferred_name}/pr/*")
+    return preferred_name
+
+
 def ensure_worktree(repo: str, branch: str) -> Path | None:
     bare_path = CACHE_DIR / f"{repo}.git"
 
@@ -181,11 +287,43 @@ def ensure_worktree(repo: str, branch: str) -> Path | None:
         log_error(f"Bare repo not found: {bare_path}")
         return None
 
-    branch_dir = branch.replace("/", "-")
+    branch_dir = branch_to_dir(branch)
     worktree_path = SRC_DIR / repo / branch_dir
 
     if worktree_path.is_dir():
         log_ok(f"Worktree exists: {worktree_path}")
+        return worktree_path
+
+    pr_spec = parse_pr(branch)
+    if pr_spec:
+        number = pr_spec["number"]
+        if pr_spec["remote_url"]:
+            # Fork PR: ensure remote exists, then targeted fetch
+            org = pr_spec["github_org_repo"].split("/")[0]
+            remote_name = find_or_add_remote(bare_path, pr_spec["remote_url"], org)
+            log_info(f"Fetching PR #{number} from {remote_name}...")
+            result = git(bare_path, "fetch", remote_name,
+                         f"refs/pull/{number}/head:refs/remotes/{remote_name}/pr/{number}",
+                         check=False)
+            if result.returncode != 0:
+                log_error(f"Failed to fetch PR #{number} from {remote_name}")
+                return None
+        else:
+            remote_name = "origin"
+
+        local_branch = resolve_pr_branch(bare_path, remote_name, number)
+        pr_ref = f"{remote_name}/pr/{number}"
+
+        if not local_branch_exists(bare_path, local_branch):
+            git(bare_path, "branch", "--track", local_branch, pr_ref)
+
+        worktree_path.parent.mkdir(parents=True, exist_ok=True)
+        log_info(f"Creating PR worktree: {repo} PR#{number} -> {worktree_path} (branch: {local_branch})")
+        result = git(bare_path, "worktree", "add", str(worktree_path), local_branch, check=False)
+        if result.returncode != 0:
+            log_error(f"Failed to create worktree for {repo} PR #{number}")
+            return None
+        log_ok(f"Created worktree: {worktree_path}")
         return worktree_path
 
     ref = find_ref(bare_path, branch)
@@ -377,6 +515,25 @@ def _repo_urls_for_env(toml_data: dict, env_name: str) -> dict[str, str]:
 
 # --- Subcommands ---
 
+def github_pr_url(bare_path: Path, pr_spec: dict) -> str | None:
+    """Return the GitHub PR URL for a given PR spec dict."""
+    number = pr_spec["number"]
+    if pr_spec.get("github_org_repo"):
+        return f"https://github.com/{pr_spec['github_org_repo']}/pull/{number}"
+
+    # Origin PR: derive org/repo from the origin remote URL
+    result = git(bare_path, "remote", "get-url", "origin", check=False, capture=True)
+    if result.returncode != 0:
+        return None
+    url = result.stdout.decode().strip()
+    m = re.match(r'git@github\.com:(.+?)(?:\.git)?$', url)
+    if not m:
+        m = re.match(r'https://github\.com/(.+?)(?:\.git)?$', url)
+    if m:
+        return f"https://github.com/{m.group(1)}/pull/{number}"
+    return None
+
+
 def cmd_status(env_names: list[str], toml_data: dict) -> None:
     """Show git status (branch, ahead/behind, dirty) for each worktree."""
     for env_name in env_names:
@@ -384,11 +541,18 @@ def cmd_status(env_names: list[str], toml_data: dict) -> None:
         repo_branches = _repo_branches_for_env(toml_data, env_name)
 
         for repo, branch in repo_branches.items():
-            branch_dir = branch.replace("/", "-")
+            branch_dir = branch_to_dir(branch)
             worktree_path = SRC_DIR / repo / branch_dir
+            pr_spec = parse_pr(branch)
 
             if not worktree_path.is_dir():
-                print(f"  {YELLOW}{repo}@{branch}{NC}  [not created]")
+                pr_str = ""
+                if pr_spec:
+                    bare_path = CACHE_DIR / f"{repo}.git"
+                    url = github_pr_url(bare_path, pr_spec)
+                    if url:
+                        pr_str = f"  {BLUE}{url}{NC}"
+                print(f"  {YELLOW}{repo}@{branch}{NC}  [not created]{pr_str}")
                 continue
 
             head = git_wt(worktree_path, "symbolic-ref", "--short", "HEAD", check=False, capture=True)
@@ -405,7 +569,14 @@ def cmd_status(env_names: list[str], toml_data: dict) -> None:
             dirty = git_wt(worktree_path, "status", "--porcelain", check=False, capture=True)
             dirty_str = f"  {RED}*dirty*{NC}" if dirty.stdout.decode().strip() else ""
 
-            print(f"  {GREEN}{repo}{NC}@{current_branch}  {ab_str}{dirty_str}")
+            pr_str = ""
+            if pr_spec:
+                bare_path = CACHE_DIR / f"{repo}.git"
+                url = github_pr_url(bare_path, pr_spec)
+                if url:
+                    pr_str = f"  {BLUE}{url}{NC}"
+
+            print(f"  {GREEN}{repo}{NC}@{current_branch}  {ab_str}{dirty_str}{pr_str}")
 
 
 def cmd_sync(env_names: list[str], toml_data: dict) -> None:
@@ -425,7 +596,7 @@ def cmd_sync(env_names: list[str], toml_data: dict) -> None:
     for env_name in env_names:
         repo_branches = _repo_branches_for_env(toml_data, env_name)
         for repo, branch in repo_branches.items():
-            branch_dir = branch.replace("/", "-")
+            branch_dir = branch_to_dir(branch)
             worktree_path = SRC_DIR / repo / branch_dir
             if not worktree_path.is_dir():
                 log_warn(f"Worktree not found, skipping: {worktree_path}")
@@ -449,7 +620,7 @@ def cmd_cleanup(env_names: list[str], toml_data: dict, delete_branches: bool = F
     for env_name in env_names:
         repo_branches = _repo_branches_for_env(toml_data, env_name)
         for repo, branch in repo_branches.items():
-            branch_dir = branch.replace("/", "-")
+            branch_dir = branch_to_dir(branch)
             worktree_path = SRC_DIR / repo / branch_dir
             bare_path = CACHE_DIR / f"{repo}.git"
 
@@ -562,7 +733,7 @@ def main() -> None:
         # Use existing worktrees only — no fetch, no create
         worktree_paths = {}
         for repo, branch in repo_branches.items():
-            branch_dir = branch.replace("/", "-")
+            branch_dir = branch_to_dir(branch)
             path = SRC_DIR / repo / branch_dir
             if path.is_dir():
                 worktree_paths[repo] = path
@@ -587,7 +758,7 @@ def main() -> None:
 
     # Fetch only repos whose worktree doesn't exist yet
     for repo, branch in repo_branches.items():
-        branch_dir = branch.replace("/", "-")
+        branch_dir = branch_to_dir(branch)
         if not (SRC_DIR / repo / branch_dir).is_dir():
             fetch_repo(repo, url=repo_urls.get(repo))
 

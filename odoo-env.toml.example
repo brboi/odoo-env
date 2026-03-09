@@ -19,6 +19,13 @@ db_template = "template0"
 smtp_server = "mailpit"
 smtp_port = 1025
 
+[master.odoorc]
+db_name = "master"
+
+[master.branches]
+community = "master"
+enterprise = "master"
+
 [my-main.branches]
 community = "master"
 enterprise = "master-fix"
@@ -48,3 +55,11 @@ db_name = "mydb"
 # utils = "git@github.com:mycompany/odoo-utils.git"
 # [_.branches]
 # utils = "main"
+
+# PR branch formats — three equivalent ways to reference a GitHub PR:
+#
+# [my-pr.branches]
+# community = "18.0"
+# enterprise = "pr/1261"                                  # origin PR (worktree: pr-1261)
+# enterprise = "odoo-dev/enterprise#1261"                 # fork PR shorthand (worktree: odoo-dev-pr-1261)
+# enterprise = "https://github.com/odoo-dev/enterprise/pull/1261"  # full URL (same)

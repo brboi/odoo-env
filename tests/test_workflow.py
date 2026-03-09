@@ -1,6 +1,173 @@
 """Tests for workflow subcommands: status, sync, cleanup."""
 from pathlib import Path
 import subprocess
+import os
+
+
+def _make_bare(tmp_path: Path, repo: str) -> Path:
+    """Create a minimal bare repo with an initial commit."""
+    bare = tmp_path / f"{repo}.git"
+    bare.mkdir(parents=True)
+    subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+
+    empty_tree = subprocess.run(
+        ["git", "--git-dir", str(bare), "hash-object", "-t", "tree", "-w", "--stdin"],
+        input=b"", check=True, capture_output=True,
+    ).stdout.decode().strip()
+
+    git_env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@t.com",
+        "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@t.com",
+    }
+    commit = subprocess.run(
+        ["git", "--git-dir", str(bare), "commit-tree", empty_tree, "-m", "init"],
+        input=b"", check=True, capture_output=True, env=git_env,
+    ).stdout.decode().strip()
+
+    subprocess.run(
+        ["git", "--git-dir", str(bare), "update-ref", "refs/heads/main", commit],
+        check=True, capture_output=True,
+    )
+    return bare
+
+
+class TestGithubPrUrl:
+    def test_fork_pr_url_from_spec(self, mod, tmp_path):
+        """Fork PR URL is built directly from github_org_repo, no git call needed."""
+        bare = _make_bare(tmp_path, "enterprise")
+        spec = {
+            "number": "1261",
+            "remote_url": "git@github.com:odoo-dev/enterprise.git",
+            "github_org_repo": "odoo-dev/enterprise",
+            "dir_slug": "odoo-dev-pr-1261",
+        }
+        url = mod.github_pr_url(bare, spec)
+        assert url == "https://github.com/odoo-dev/enterprise/pull/1261"
+
+    def test_origin_pr_url_from_remote(self, mod, tmp_path):
+        """Origin PR URL is derived from the origin remote URL."""
+        bare = _make_bare(tmp_path, "enterprise")
+        subprocess.run(
+            ["git", "--git-dir", str(bare), "remote", "add", "origin",
+             "git@github.com:odoo/enterprise.git"],
+            check=True, capture_output=True,
+        )
+        spec = {
+            "number": "1370",
+            "remote_url": None,
+            "github_org_repo": None,
+            "dir_slug": "pr-1370",
+        }
+        url = mod.github_pr_url(bare, spec)
+        assert url == "https://github.com/odoo/enterprise/pull/1370"
+
+    def test_origin_pr_url_https_remote(self, mod, tmp_path):
+        """Works with https:// origin URLs too."""
+        bare = _make_bare(tmp_path, "enterprise")
+        subprocess.run(
+            ["git", "--git-dir", str(bare), "remote", "add", "origin",
+             "https://github.com/odoo/enterprise.git"],
+            check=True, capture_output=True,
+        )
+        spec = {"number": "42", "remote_url": None, "github_org_repo": None, "dir_slug": "pr-42"}
+        url = mod.github_pr_url(bare, spec)
+        assert url == "https://github.com/odoo/enterprise/pull/42"
+
+    def test_returns_none_when_no_origin(self, mod, tmp_path):
+        """Returns None when origin remote is missing and no org_repo in spec."""
+        bare = _make_bare(tmp_path, "enterprise")
+        spec = {"number": "1", "remote_url": None, "github_org_repo": None, "dir_slug": "pr-1"}
+        url = mod.github_pr_url(bare, spec)
+        assert url is None
+
+
+class TestResolvePrBranch:
+    def _make_bare_with_pr_refs(self, tmp_path: Path) -> tuple[Path, str]:
+        """Bare repo with refs/remotes/origin/pr/1 pointing to same SHA as origin/18.0-feature."""
+        bare = _make_bare(tmp_path, "repo")
+
+        empty_tree = subprocess.run(
+            ["git", "--git-dir", str(bare), "hash-object", "-t", "tree", "-w", "--stdin"],
+            input=b"", check=True, capture_output=True,
+        ).stdout.decode().strip()
+
+        git_env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@t.com",
+            "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@t.com",
+        }
+        commit = subprocess.run(
+            ["git", "--git-dir", str(bare), "commit-tree", empty_tree, "-m", "feature"],
+            input=b"", check=True, capture_output=True, env=git_env,
+        ).stdout.decode().strip()
+
+        # Create the PR ref and the named branch ref pointing to same SHA
+        subprocess.run(
+            ["git", "--git-dir", str(bare), "update-ref",
+             "refs/remotes/origin/pr/1", commit],
+            check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "--git-dir", str(bare), "update-ref",
+             "refs/remotes/origin/18.0-feature", commit],
+            check=True, capture_output=True,
+        )
+        return bare, commit
+
+    def test_resolves_branch_from_sha(self, mod, tmp_path):
+        bare, _ = self._make_bare_with_pr_refs(tmp_path)
+        branch = mod.resolve_pr_branch(bare, "origin", "1")
+        assert branch == "18.0-feature"
+
+    def test_fallback_when_pr_ref_missing(self, mod, tmp_path):
+        bare = _make_bare(tmp_path, "repo")
+        branch = mod.resolve_pr_branch(bare, "origin", "999")
+        assert branch == "pr-999"
+
+
+class TestCmdStatusPrBranch:
+    def test_origin_pr_shows_not_created_with_url(self, mod, tmp_path, monkeypatch, capsys):
+        """cmd_status for a pr/NNNN branch shows the GitHub URL when worktree missing."""
+        monkeypatch.setattr(mod, "SRC_DIR", tmp_path / "src")
+        monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "cache")
+
+        bare = _make_bare(tmp_path / "cache", "enterprise")
+        subprocess.run(
+            ["git", "--git-dir", str(bare), "remote", "add", "origin",
+             "git@github.com:odoo/enterprise.git"],
+            check=True, capture_output=True,
+        )
+
+        toml_data = {"my-env": {"branches": {"enterprise": "pr/1261"}}}
+        mod.cmd_status(["my-env"], toml_data)
+        out = capsys.readouterr().out
+        assert "not created" in out
+        assert "https://github.com/odoo/enterprise/pull/1261" in out
+
+    def test_fork_pr_shows_not_created_with_url(self, mod, tmp_path, monkeypatch, capsys):
+        """cmd_status for a fork PR spec shows the fork GitHub URL."""
+        monkeypatch.setattr(mod, "SRC_DIR", tmp_path / "src")
+        monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "cache")
+
+        _make_bare(tmp_path / "cache", "enterprise")
+
+        toml_data = {"my-env": {"branches": {"enterprise": "odoo-dev/enterprise#1261"}}}
+        mod.cmd_status(["my-env"], toml_data)
+        out = capsys.readouterr().out
+        assert "not created" in out
+        assert "https://github.com/odoo-dev/enterprise/pull/1261" in out
+
+    def test_non_pr_branch_shows_no_url(self, mod, tmp_path, monkeypatch, capsys):
+        """cmd_status for a normal branch shows no PR URL."""
+        monkeypatch.setattr(mod, "SRC_DIR", tmp_path / "src")
+        monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "cache")
+
+        toml_data = {"my-env": {"branches": {"community": "18.0"}}}
+        mod.cmd_status(["my-env"], toml_data)
+        out = capsys.readouterr().out
+        assert "github.com" not in out
+        assert "not created" in out
 
 
 class TestRepoUrls:
