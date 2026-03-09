@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 try:
@@ -261,6 +262,7 @@ def fetch_repo(repo: str, url: str | None = None) -> None:
     if not bare_path.is_dir():
         log_info(f"Bare repo not found for '{repo}', setting it up automatically...")
         setup_bare_repo(repo, url=url)
+    git(bare_path, "pack-refs", "--all", check=False)
     for remote in remotes(bare_path):
         log_info(f"Fetching {repo} ({remote})...")
         result = git(bare_path, "fetch", remote, "--prune", check=False)
@@ -723,17 +725,9 @@ def cmd_status(env_names: list[str], toml_data: dict) -> None:
 
 def cmd_rebase(env_names: list[str], toml_data: dict) -> None:
     """Fetch bare repos and rebase tracking worktrees onto their upstream."""
-    repos_to_fetch: set[str] = set()
-    for env_name in env_names:
-        repos_to_fetch.update(_repo_branches_for_env(toml_data, env_name).keys())
 
-    # Collect all URLs across targeted envs
-    repo_urls: dict[str, str] = {}
-    for env_name in env_names:
-        repo_urls.update(_repo_urls_for_env(toml_data, env_name))
-
-    for repo in sorted(repos_to_fetch):
-        fetch_repo(repo, url=repo_urls.get(repo))
+    # Pass 1: collect worktree info and their upstream refs BEFORE fetching
+    worktree_infos = []  # [(repo, branch, worktree_path, remote, upstream_branch)]
 
     for env_name in env_names:
         repo_branches = _repo_branches_for_env(toml_data, env_name)
@@ -749,12 +743,52 @@ def cmd_rebase(env_names: list[str], toml_data: dict) -> None:
                 log_warn(f"Detached HEAD in {worktree_path}, skipping rebase")
                 continue
 
-            log_info(f"Rebasing {repo}@{branch}...")
-            result = git_wt(worktree_path, "rebase", "--autostash", "@{u}", check=False)
-            if result.returncode != 0:
-                log_warn(f"Rebase failed for {repo}@{branch} — resolve manually")
-            else:
-                log_ok(f"Rebased: {repo}@{branch}")
+            upstream = git_wt(worktree_path, "rev-parse", "--abbrev-ref", "@{u}", check=False, capture=True)
+            if upstream.returncode != 0:
+                log_warn(f"No upstream configured for {repo}@{branch}, skipping rebase")
+                continue
+
+            upstream_ref = upstream.stdout.decode().strip()  # e.g. "origin/master"
+            remote, _, upstream_branch = upstream_ref.partition("/")
+            worktree_infos.append((repo, branch, worktree_path, remote, upstream_branch))
+
+    # Collect custom URLs across targeted envs
+    repo_urls: dict[str, str] = {}
+    for env_name in env_names:
+        repo_urls.update(_repo_urls_for_env(toml_data, env_name))
+
+    # Pass 2: fetch only the specific upstream branches needed (deduplicated)
+    fetch_tasks: set[tuple[str, str, str]] = {
+        (repo, remote, upstream_branch)
+        for repo, _, _, remote, upstream_branch in worktree_infos
+    }
+
+    def fetch_specific(repo: str, remote: str, upstream_branch: str) -> None:
+        bare_path = CACHE_DIR / f"{repo}.git"
+        if not bare_path.is_dir():
+            log_info(f"Bare repo not found for '{repo}', setting it up automatically...")
+            setup_bare_repo(repo, url=repo_urls.get(repo))
+        log_info(f"Fetching {repo} {upstream_branch} ({remote})...")
+        result = git(bare_path, "fetch", remote, upstream_branch, check=False)
+        if result.returncode != 0:
+            log_warn(f"Could not fetch {repo}/{upstream_branch} from {remote}")
+
+    with ThreadPoolExecutor() as executor:
+        futures = {
+            executor.submit(fetch_specific, repo, remote, upstream_branch): (repo, remote, upstream_branch)
+            for repo, remote, upstream_branch in sorted(fetch_tasks)
+        }
+        for future in as_completed(futures):
+            future.result()
+
+    # Pass 3: rebase each worktree onto its upstream
+    for repo, branch, worktree_path, remote, upstream_branch in worktree_infos:
+        log_info(f"Rebasing {repo}@{branch} onto {remote}/{upstream_branch}...")
+        result = git_wt(worktree_path, "rebase", "--autostash", "@{u}", check=False)
+        if result.returncode != 0:
+            log_warn(f"Rebase failed for {repo}@{branch} — resolve manually")
+        else:
+            log_ok(f"Rebased: {repo}@{branch}")
 
 
 def cmd_remove(env_name: str, toml_data: dict) -> None:
