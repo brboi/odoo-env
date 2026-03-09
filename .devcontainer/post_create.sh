@@ -7,6 +7,8 @@ xargs sudo apt install -y < apt-system-deps.txt
 
 # Bootstrapping mise
 mise trust && mise install
+SNIPPET_ZSH="source /work/scripts/odoo-shell-aliases.sh"
+echo "$SNIPPET_ZSH" >> /root/.zshrc
 SNIPPET_ZSH="eval \"\$(mise activate zsh)\""
 echo "$SNIPPET_ZSH" >> /root/.zshrc
 mise run bootstrap
