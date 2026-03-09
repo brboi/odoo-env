@@ -140,6 +140,24 @@ environment in `odoo-env.toml` uses the same branch).
 
 > `src/enterprise/` follows the same pattern.
 
+## VSCode
+
+Copy the provided example settings on first clone:
+
+```bash
+cp .vscode/settings.json.example .vscode/settings.json
+```
+
+This configures:
+
+- **Ctrl+P (Quick Open)** finds files inside `src/` even though `src/*` is in `.gitignore`
+  (`search.useIgnoreFiles: false`).
+- Heavy directories excluded from indexing: `.cache/`, `.venv/`, `__pycache__`, `*.pyc`,
+  `node_modules`.
+
+`.vscode/settings.json` is gitignored so your local settings (e.g. `Odoo.selectedProfile`
+set by the Odoo LSP extension) are never committed.
+
 ## Dev services (optional)
 
 `compose.yml` provides Postgres+pgvector, a mail catcher, and a browser DB client.
