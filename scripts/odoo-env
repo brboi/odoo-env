@@ -16,6 +16,7 @@ Copy odoo-env.toml.example to odoo-env.toml and customize.
 
 import argparse
 import configparser
+import json
 import os
 import tomllib
 import re
@@ -539,6 +540,180 @@ def generate_odools_config(
     return out
 
 
+def generate_vscode_workspace(
+    name: str,
+    worktree_paths: dict[str, Path],
+    env: dict[str, str],
+    python_path: str,
+    odoo_rc_path: str,
+) -> Path:
+    """Generate a VS Code .code-workspace file for the environment."""
+    env_dir = ROOT_DIR / ".cache" / "envs" / name
+    out = env_dir / f"{name}.code-workspace"
+
+    # Folders with paths relative to the workspace file location
+    folders = []
+    for repo, path in worktree_paths.items():
+        rel = os.path.relpath(path, env_dir)
+        folders.append({"name": repo, "path": rel})
+
+    venv_python = str(ROOT_DIR / ".venv" / "bin" / "python3")
+
+    # Terminal env vars: all non-empty entries from env dict
+    terminal_env = {k: v for k, v in env.items() if v}
+
+    workspace = {
+        "folders": folders,
+        "settings": {
+            "python.defaultInterpreterPath": venv_python,
+            "search.useIgnoreFiles": False,
+            "search.exclude": {
+                "**/__pycache__": True,
+                "**/*.pyc": True,
+                "**/node_modules": True,
+            },
+            "files.exclude": {
+                "**/__pycache__": True,
+                "**/*.pyc": True,
+            },
+            "Odoo.selectedConfiguration": f"Odoo Dev \u2014 {name}",
+            "terminal.integrated.env.linux": terminal_env,
+            "terminal.integrated.env.osx": terminal_env,
+        },
+        "launch": {
+            "version": "0.2.0",
+            "configurations": [
+                {
+                    "name": f"Odoo: {name}",
+                    "type": "debugpy",
+                    "request": "launch",
+                    "program": "${workspaceFolder:community}/odoo-bin",
+                    "args": ["-c", odoo_rc_path],
+                    "env": {
+                        "ODOO_ENV_NAME": name,
+                        "PYTHONPATH": python_path,
+                    },
+                }
+            ],
+        },
+    }
+
+    env_dir.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(workspace, indent=2))
+    log_ok(f"Generated: {out.relative_to(ROOT_DIR)}")
+    return out
+
+
+def generate_zed_workspace(
+    name: str,
+    worktree_paths: dict[str, Path],
+    env: dict[str, str],
+) -> None:
+    """Generate Zed workspace: symlinks to worktrees + .zed/settings.json."""
+    env_dir = ROOT_DIR / ".cache" / "envs" / name
+    env_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create relative symlinks for each worktree
+    for repo, path in worktree_paths.items():
+        link = env_dir / repo
+        if link.exists() or link.is_symlink():
+            link.unlink()
+        rel = os.path.relpath(path, env_dir)
+        link.symlink_to(rel)
+
+    venv_python = str(ROOT_DIR / ".venv" / "bin" / "python3")
+
+    settings = {
+        "tab_size": 4,
+        "lsp": {
+            "pyright": {
+                "settings": {
+                    "python.pythonPath": venv_python,
+                }
+            }
+        },
+        "terminal": {
+            "env": {
+                "ODOO_ENV_NAME": env.get("ODOO_ENV_NAME", name),
+                "ODOO_RC": env.get("ODOO_RC", ""),
+                "PYTHONPATH": env.get("PYTHONPATH", ""),
+                "ODOO_PATH": env.get("ODOO_PATH", ""),
+            }
+        },
+        "file_scan_exclusions": [
+            "**/__pycache__",
+            "**/node_modules",
+            "**/*.pyc",
+        ],
+    }
+
+    zed_dir = env_dir / ".zed"
+    zed_dir.mkdir(parents=True, exist_ok=True)
+    zed_settings = zed_dir / "settings.json"
+    zed_settings.write_text(json.dumps(settings, indent=2))
+    log_ok(f"Generated: {zed_settings.relative_to(ROOT_DIR)}")
+
+
+def generate_idea_project(
+    name: str,
+    worktree_paths: dict[str, Path],
+    env: dict[str, str],
+) -> None:
+    """Generate a minimal JetBrains/PyCharm project in .cache/envs/{name}/.idea/."""
+    env_dir = ROOT_DIR / ".cache" / "envs" / name
+    idea_dir = env_dir / ".idea"
+    idea_dir.mkdir(parents=True, exist_ok=True)
+
+    iml_name = f"odoo-{name}.iml"
+
+    # .idea/.name
+    (idea_dir / ".name").write_text(f"odoo-{name}")
+
+    # .idea/modules.xml
+    (idea_dir / "modules.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<project version="4">\n'
+        '  <component name="ProjectModuleManager">\n'
+        '    <modules>\n'
+        f'      <module fileurl="file://$PROJECT_DIR$/.idea/{iml_name}" filepath="$PROJECT_DIR$/.idea/{iml_name}" />\n'
+        '    </modules>\n'
+        '  </component>\n'
+        '</project>\n'
+    )
+
+    # .idea/misc.xml
+    (idea_dir / "misc.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<project version="4">\n'
+        '  <component name="ProjectRootManager" version="2"'
+        ' project-jdk-name="Python 3.12 (odoo-env)" project-jdk-type="Python SDK" />\n'
+        '</project>\n'
+    )
+
+    # .idea/odoo-{name}.iml
+    content_root_lines: list[str] = []
+    for repo, path in worktree_paths.items():
+        content_root_lines.append(f'    <content url="file://{path}">')
+        content_root_lines.append(f'      <excludeFolder url="file://{path}/node_modules" />')
+        content_root_lines.append(f'      <excludeFolder url="file://{path}/__pycache__" />')
+        content_root_lines.append('    </content>')
+
+    content_roots_str = "\n".join(content_root_lines)
+    (idea_dir / iml_name).write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<module type="PYTHON_MODULE" version="4">\n'
+        '  <component name="NewModuleRootManager" inherit-compiler-output="true">\n'
+        '    <exclude-output />\n'
+        f'{content_roots_str}\n'
+        '    <orderEntry type="inheritedJdk" />\n'
+        '    <orderEntry type="sourceFolder" forTests="false" />\n'
+        '  </component>\n'
+        '</module>\n'
+    )
+
+    log_ok(f"Generated: {idea_dir.relative_to(ROOT_DIR)}")
+
+
 # --- odoo-env.toml management ---
 
 def load_odoo_env_toml() -> dict:
@@ -939,6 +1114,11 @@ def cmd_activate(name: str, toml_data: dict) -> None:
         "PATH": str(community_path) + ":" + os.environ.get("PATH", ""),
     }
 
+    env_dir = ROOT_DIR / ".cache" / "envs" / name
+    vscode_ws = generate_vscode_workspace(name, worktree_paths, env, python_path, str(odoo_conf))
+    generate_zed_workspace(name, worktree_paths, env)
+    generate_idea_project(name, worktree_paths, env)
+
     print()
     log_ok("Environment ready!")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -947,6 +1127,12 @@ def cmd_activate(name: str, toml_data: dict) -> None:
     print( "  Worktrees:")
     for repo, path in worktree_paths.items():
         print(f"    {path.relative_to(ROOT_DIR)}")
+    ws_rel = vscode_ws.relative_to(ROOT_DIR)
+    dir_rel = env_dir.relative_to(ROOT_DIR)
+    print("  IDE workspaces:")
+    print(f"    VS Code:   code {hyperlink(str(ws_rel), 'file://' + str(vscode_ws))}")
+    print(f"    Zed:       zed  {dir_rel}")
+    print(f"    JetBrains: pycharm {dir_rel}")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print()
     print("Useful commands:")
