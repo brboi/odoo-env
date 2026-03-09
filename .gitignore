@@ -22,6 +22,8 @@ __pycache__/
 # IDE
 .idea/
 .vscode/settings.json
+# Generated VS Code workspace files (contain machine-specific paths)
+*.code-workspace
 
 # Claude Code local settings
 .claude/

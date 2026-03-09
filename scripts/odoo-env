@@ -3,12 +3,14 @@
 """odoo-env: Configure and launch an Odoo development environment.
 
 Usage:
-    odoo-env activate <env>   Set up worktrees and launch shell
-    odoo-env <env>            Shorthand for activate
-    odoo-env list             List environments from odoo-env.toml
-    odoo-env status           Git status (current env, or all if none active)
-    odoo-env rebase           Fetch + rebase (current env, or all if none active)
-    odoo-env remove <env>     Remove worktrees for an environment
+    odoo-env activate <env>        Set up worktrees and launch shell
+    odoo-env <env>                 Shorthand for activate
+    odoo-env list                  List environments from odoo-env.toml
+    odoo-env status                Git status (current env, or all if none active)
+    odoo-env rebase                Fetch + rebase (current env, or all if none active)
+    odoo-env remove <env>          Remove worktrees for an environment
+    odoo-env workspace <env>       Generate IDE workspace files (VS Code, Zed, JetBrains)
+    odoo-env workspace <env> -o    Generate and open in editor
 
 Environments are declared in odoo-env.toml at the repo root.
 Copy odoo-env.toml.example to odoo-env.toml and customize.
@@ -16,6 +18,7 @@ Copy odoo-env.toml.example to odoo-env.toml and customize.
 
 import argparse
 import configparser
+import json
 import os
 import tomllib
 import re
@@ -539,6 +542,221 @@ def generate_odools_config(
     return out
 
 
+# --- IDE workspace generation ---
+
+def _compute_env_vars(name: str, worktree_paths: dict[str, Path], toml_data: dict) -> dict[str, str]:
+    """Compute the environment variables for an environment (mirrors cmd_activate)."""
+    env_section = toml_data.get(name, {})
+    defaults = toml_data.get("_", {}).get("odoorc", {})
+    odoorc_overrides = env_section.get("odoorc", {})
+    port = int(odoorc_overrides.get("port", defaults.get("port", 8069)))
+
+    community_path = worktree_paths["community"]
+    community_branch = _repo_branches_for_env(toml_data, name).get("community", "")
+    odoo_version = stable_base(community_branch) or community_branch
+
+    extra_worktrees = {r: p for r, p in worktree_paths.items() if r != "community"}
+    python_path, addons_path = build_paths(community_path, extra_worktrees)
+
+    odoo_conf = ROOT_DIR / ".cache" / "envs" / name / "odoorc"
+    enterprise_path = worktree_paths.get("enterprise")
+    extra_paths = ":".join(
+        str(p) for r, p in worktree_paths.items()
+        if r not in ("community", "enterprise")
+    )
+
+    return {
+        "ODOO_ENV_NAME": name,
+        "ODOO_VERSION": odoo_version,
+        "ODOO_RC": str(odoo_conf),
+        "PYTHONPATH": python_path,
+        "ODOO_ADDONS_PATH": addons_path,
+        "ODOO_PORT": str(port),
+        "ODOO_PATH": str(community_path),
+        "ODOO_ENTERPRISE_PATH": str(enterprise_path) if enterprise_path else "",
+        "ODOO_EXTRA_PATHS": extra_paths,
+    }
+
+
+def generate_workspace_vscode(
+    name: str,
+    worktree_paths: dict[str, Path],
+    env_vars: dict[str, str],
+    repo_branches: dict[str, str],
+) -> Path:
+    """Generate a VS Code .code-workspace file at the repo root.
+
+    Folders: odoo-env root + each worktree (for scoped search).
+    Settings: Python interpreter, search exclusions, terminal env vars.
+    """
+    folders = [{"path": ".", "name": "odoo-env"}]
+    for repo, path in worktree_paths.items():
+        branch = repo_branches.get(repo, "")
+        rel = os.path.relpath(path, ROOT_DIR)
+        folders.append({"path": rel, "name": f"{repo} ({branch})"})
+
+    workspace = {
+        "folders": folders,
+        "settings": {
+            "python.defaultInterpreterPath": str(ROOT_DIR / ".venv" / "bin" / "python3"),
+            "python-envs.defaultEnvManager": "ms-python.python:venv",
+            "search.useIgnoreFiles": False,
+            "search.exclude": {
+                ".cache/**": True,
+                ".venv/**": True,
+                "**/__pycache__": True,
+                "**/*.pyc": True,
+                "**/node_modules": True,
+            },
+            # Inject env vars into every integrated terminal — no manual activation needed.
+            "terminal.integrated.env.linux": env_vars,
+            "terminal.integrated.env.osx": env_vars,
+        },
+    }
+
+    out = ROOT_DIR / f"{name}.code-workspace"
+    out.write_text(json.dumps(workspace, indent=2) + "\n")
+    return out
+
+
+def generate_workspace_zed(
+    name: str,
+    worktree_paths: dict[str, Path],
+    env_vars: dict[str, str],
+) -> Path:
+    """Generate a Zed workspace directory in .cache/workspaces/<name>/.
+
+    The directory contains a .zed/settings.json with terminal env vars and
+    an LSP stub. Open the whole workspace with:
+        zed .cache/workspaces/<name> src/community/<b> src/enterprise/<b> ...
+    The .cache/ tree is gitignored so these files are never committed.
+    """
+    workspace_dir = ROOT_DIR / ".cache" / "workspaces" / name
+    zed_dir = workspace_dir / ".zed"
+    zed_dir.mkdir(parents=True, exist_ok=True)
+
+    settings: dict = {
+        "terminal": {
+            "env": env_vars,
+        },
+    }
+
+    out = zed_dir / "settings.json"
+    out.write_text(json.dumps(settings, indent=2) + "\n")
+    return out
+
+
+def generate_workspace_jetbrains(
+    name: str,
+    worktree_paths: dict[str, Path],
+    env_vars: dict[str, str],
+) -> Path:
+    """Generate a JetBrains run configuration in .run/.
+
+    Uses $PROJECT_DIR$ for paths relative to the repo root (portable across machines).
+    Non-relative env var values (ODOO_RC, ODOO_PATH, etc.) are also rewritten with
+    $PROJECT_DIR$ so the config works for any team member with the same branch layout.
+    Run configs in .run/ can be committed to git and shared.
+    """
+    run_dir = ROOT_DIR / ".run"
+    run_dir.mkdir(exist_ok=True)
+
+    root_str = str(ROOT_DIR)
+
+    def to_jb(val: str) -> str:
+        """Replace absolute root prefix with $PROJECT_DIR$ JetBrains macro."""
+        if val.startswith(root_str):
+            return "$PROJECT_DIR$" + val[len(root_str):]
+        return val
+
+    community_path = worktree_paths["community"]
+    odoo_bin = to_jb(str(community_path / "odoo-bin"))
+    python = "$PROJECT_DIR$/.venv/bin/python3"
+
+    env_lines = "".join(
+        f'\n      <env name="{k}" value="{to_jb(v)}" />'
+        for k, v in env_vars.items()
+        if v
+    )
+
+    xml = (
+        f'<!-- Generated by odoo-env workspace — re-run to regenerate -->\n'
+        f'<component name="ProjectRunConfigurationManager">\n'
+        f'  <configuration default="false" name="Odoo ({name})"'
+        f' type="PythonConfigurationType" factoryName="Python">\n'
+        f'    <module name="{ROOT_DIR.name}" />\n'
+        f'    <option name="INTERPRETER_OPTIONS" value="" />\n'
+        f'    <option name="PARENT_ENVS" value="true" />\n'
+        f'    <envs>{env_lines}\n'
+        f'    </envs>\n'
+        f'    <option name="SDK_HOME" value="{python}" />\n'
+        f'    <option name="SCRIPT_NAME" value="{odoo_bin}" />\n'
+        f'    <option name="PARAMETERS" value="-c $ODOO_RC" />\n'
+        f'    <option name="SHOW_COMMAND_LINE" value="false" />\n'
+        f'    <option name="EMULATE_TERMINAL" value="true" />\n'
+        f'    <option name="MODULE_MODE" value="false" />\n'
+        f'    <option name="REDIRECT_INPUT" value="false" />\n'
+        f'    <option name="INPUT_FILE" value="" />\n'
+        f'    <method v="2" />\n'
+        f'  </configuration>\n'
+        f'</component>\n'
+    )
+
+    safe_name = re.sub(r"[^\w\-]", "_", name)
+    out = run_dir / f"Odoo_{safe_name}.run.xml"
+    out.write_text(xml)
+    return out
+
+
+def cmd_workspace(name: str, toml_data: dict, open_editor: bool = False) -> None:
+    """Generate IDE workspace files for the given environment and optionally open it."""
+    get_env(toml_data, name)  # validates env exists; exits if not
+
+    worktree_paths = _worktree_paths_for_env(toml_data, name)
+    if worktree_paths is None:
+        log_error(f"Worktrees for '{name}' are not set up yet.")
+        log_info(f"Run 'odoo-env activate {name}' first, then re-run this command.")
+        sys.exit(1)
+
+    repo_branches = _repo_branches_for_env(toml_data, name)
+    env_vars = _compute_env_vars(name, worktree_paths, toml_data)
+
+    # Refresh odools.toml so the Odoo LSP extension sees this env as active.
+    generate_odools_config(name, worktree_paths, env_vars["PYTHONPATH"], toml_data)
+
+    vscode_ws = generate_workspace_vscode(name, worktree_paths, env_vars, repo_branches)
+    log_ok(f"VS Code workspace:    {vscode_ws.relative_to(ROOT_DIR)}")
+
+    zed_settings = generate_workspace_zed(name, worktree_paths, env_vars)
+    log_ok(f"Zed settings:         {zed_settings.relative_to(ROOT_DIR)}")
+
+    jb_config = generate_workspace_jetbrains(name, worktree_paths, env_vars)
+    log_ok(f"JetBrains run config: {jb_config.relative_to(ROOT_DIR)}")
+
+    zed_dirs = " ".join(
+        [str(zed_settings.parent.parent)] + [str(p) for p in worktree_paths.values()]
+    )
+    print()
+    print(f"  VS Code:     code {vscode_ws.name}")
+    print(f"  Zed:         zed {zed_dirs}")
+    print(f"  JetBrains:   open project root, run config '{jb_config.stem}' will appear in Run menu")
+    print()
+
+    if open_editor:
+        if shutil.which("code"):
+            log_info("Opening VS Code...")
+            subprocess.run(["code", str(vscode_ws)], check=False)
+        elif shutil.which("zed"):
+            log_info("Opening Zed...")
+            subprocess.run(
+                ["zed", str(zed_settings.parent.parent)] + [str(p) for p in worktree_paths.values()],
+                check=False,
+            )
+        else:
+            log_warn("No supported editor found in PATH (tried: code, zed)")
+            log_info(f"Open manually: code {vscode_ws.name}")
+
+
 # --- odoo-env.toml management ---
 
 def load_odoo_env_toml() -> dict:
@@ -955,6 +1173,7 @@ def cmd_activate(name: str, toml_data: dict) -> None:
     if debinstall.is_file():
         print(f"  $ODOO_PATH/setup/debinstall.sh  # install Python deps via apt (recommended) (Debian/Ubuntu)")
     print("  pip install -r $ODOO_PATH/requirements.txt  # install Python deps through pip")
+    print(f"  odoo-env workspace {name} --open   # open in VS Code / Zed with env pre-configured")
     print()
 
     os.environ.update(env)
@@ -982,7 +1201,7 @@ def env_completer(prefix, **kwargs):
 
 
 def main() -> None:
-    SUBCOMMANDS = {"list", "activate", "status", "rebase", "remove"}
+    SUBCOMMANDS = {"list", "activate", "status", "rebase", "remove", "workspace"}
 
     # Shortcut: odoo-env <env> → odoo-env activate <env>
     if len(sys.argv) > 1 and sys.argv[1] not in SUBCOMMANDS and not sys.argv[1].startswith("-"):
@@ -1006,6 +1225,17 @@ def main() -> None:
 
     sp_remove = subparsers.add_parser("remove", help="Remove worktrees for an environment")
     sp_remove.add_argument("env_name", help="Environment name").completer = env_completer
+
+    sp_workspace = subparsers.add_parser(
+        "workspace",
+        help="Generate IDE workspace files (VS Code, Zed, JetBrains) and optionally open editor",
+    )
+    sp_workspace.add_argument("env_name", help="Environment name").completer = env_completer
+    sp_workspace.add_argument(
+        "--open", "-o",
+        action="store_true",
+        help="Open the workspace in an available editor (tries: code, zed)",
+    )
 
     if argcomplete:
         argcomplete.autocomplete(parser)
@@ -1032,6 +1262,8 @@ def main() -> None:
         cmd_rebase(env_names, toml_data)
     elif args.command == "remove":
         cmd_remove(args.env_name, toml_data)
+    elif args.command == "workspace":
+        cmd_workspace(args.env_name, toml_data, open_editor=args.open)
 
 
 if __name__ == "__main__":
