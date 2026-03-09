@@ -11,6 +11,7 @@
 
 [_.odoorc]
 admin_passwd = "Password"
+server_wide_modules = base,rpc,web
 db_host = "postgres"
 db_port = 5432
 db_user = "odoo"
