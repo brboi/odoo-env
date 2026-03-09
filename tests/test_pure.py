@@ -120,3 +120,54 @@ class TestBuildPaths:
         assert str(community / "addons") not in parts[:2]
         assert str(extra1) in addons_path
         assert str(extra2) in addons_path
+
+
+class TestDeduceRunbotBundles:
+    def test_all_stable_returns_stable_version(self, mod):
+        branches = {"community": "18.0", "enterprise": "18.0"}
+        assert mod.deduce_runbot_bundles(branches) == ["18.0"]
+
+    def test_all_stable_master(self, mod):
+        branches = {"community": "master", "enterprise": "master"}
+        assert mod.deduce_runbot_bundles(branches) == ["master"]
+
+    def test_feature_branch_returned(self, mod):
+        branches = {"community": "master", "enterprise": "master-my-fix"}
+        assert mod.deduce_runbot_bundles(branches) == ["master-my-fix"]
+
+    def test_all_on_feature_branch(self, mod):
+        branches = {"community": "18.0-fix", "enterprise": "18.0-fix"}
+        assert mod.deduce_runbot_bundles(branches) == ["18.0-fix"]
+
+    def test_multiple_different_feature_branches(self, mod):
+        branches = {"community": "master-feat-a", "enterprise": "master-feat-b"}
+        result = mod.deduce_runbot_bundles(branches)
+        assert set(result) == {"master-feat-a", "master-feat-b"}
+
+    def test_deduplicates_same_feature_branch(self, mod):
+        branches = {"community": "master-fix", "enterprise": "master-fix", "design-themes": "master-fix"}
+        assert mod.deduce_runbot_bundles(branches) == ["master-fix"]
+
+    def test_pr_without_resolver_ignored(self, mod):
+        # Unresolved PR: can't determine bundle name → falls back to stable
+        branches = {"community": "master", "enterprise": "pr/1261"}
+        result = mod.deduce_runbot_bundles(branches)
+        assert result == ["master"]
+
+    def test_pr_with_resolver_feature_branch(self, mod):
+        branches = {"community": "master", "enterprise": "pr/1261"}
+        resolved = {"pr/1261": "master-my-fix"}
+        assert mod.deduce_runbot_bundles(branches, resolved) == ["master-my-fix"]
+
+    def test_pr_with_resolver_stable_branch_ignored(self, mod):
+        # Resolved PR is on stable → treated as stable, not a feature branch
+        branches = {"community": "18.0", "enterprise": "pr/42"}
+        resolved = {"pr/42": "18.0"}
+        assert mod.deduce_runbot_bundles(branches, resolved) == ["18.0"]
+
+    def test_runbot_bundle_urls(self, mod):
+        urls = mod.runbot_bundle_urls(["master-fix", "18.0"])
+        assert urls == [
+            "https://runbot.odoo.com/runbot/bundle/master-fix",
+            "https://runbot.odoo.com/runbot/bundle/18.0",
+        ]
