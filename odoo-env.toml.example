@@ -10,8 +10,10 @@
 # [env.repos]       custom repo URLs for non-odoo repos (alias → git URL)
 
 [_.odoorc]
+port = 8069
 admin_passwd = "Password"
 server_wide_modules = "base,web"
+data_dir = ".cache/odoo"
 db_name = "odoo"
 db_host = "postgres"
 db_port = 5432
@@ -57,6 +59,11 @@ db_name = "mydb"
 # utils = "git@github.com:mycompany/odoo-utils.git"
 # [_.branches]
 # utils = "main"
+
+# Skip JS tooling (jsconfig.json, package.json, node_modules symlink) for specific repos
+# Useful when the repo doesn't gitignore these files and you can't modify it.
+# [my-client.options]
+# skip_js_tooling = ["my-custom-repo"]
 
 # PR branch formats — three equivalent ways to reference a GitHub PR:
 #

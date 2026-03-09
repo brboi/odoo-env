@@ -348,7 +348,7 @@ def ensure_worktree(repo: str, branch: str) -> Path | None:
     return worktree_path
 
 
-def setup_js_tooling(worktree_paths: dict[str, Path]) -> None:
+def setup_js_tooling(worktree_paths: dict[str, Path], skip_repos: set[str] | None = None) -> None:
     community_path = worktree_paths.get("community")
     if community_path is None:
         return
@@ -360,6 +360,8 @@ def setup_js_tooling(worktree_paths: dict[str, Path]) -> None:
     dst_names = [".eslintignore",  ".eslintrc.json",  "jsconfig.json",  "package.json"]
 
     for repo, repo_path in worktree_paths.items():
+        if skip_repos and repo in skip_repos:
+            continue
         if (repo_path / "jsconfig.json").exists():
             log_ok(f"JS tooling already present: {repo}")
         else:
@@ -408,6 +410,17 @@ def build_odoo_conf(root_dir: Path, addons_path: str, port: int, name: str, defa
     return out
 
 
+def discover_addons_paths(repo_path: Path) -> list[Path]:
+    """Scan repo for Odoo module directories; return their parent dirs as addons paths."""
+    SKIP = {"node_modules", ".git", "__pycache__", "setup"}
+    addons_dirs: set[Path] = set()
+    for manifest in repo_path.rglob("__manifest__.py"):
+        if any(p in SKIP for p in manifest.parts):
+            continue
+        addons_dirs.add(manifest.parent.parent)
+    return sorted(addons_dirs) if addons_dirs else [repo_path]
+
+
 def build_paths(community_path: Path, extra_worktrees: dict[str, Path]) -> tuple[str, str]:
     python_path = str(community_path)
     addons_parts = [
@@ -415,7 +428,8 @@ def build_paths(community_path: Path, extra_worktrees: dict[str, Path]) -> tuple
         str(community_path / "odoo" / "addons"),
     ]
     for repo_path in extra_worktrees.values():
-        addons_parts.insert(0, str(repo_path))
+        for p in reversed(discover_addons_paths(repo_path)):
+            addons_parts.insert(0, str(p))
     return python_path, ",".join(addons_parts)
 
 
@@ -439,7 +453,8 @@ def generate_odools_config(
         ap.append(str(comm / "odoo" / "addons"))
         for repo, path in paths.items():
             if repo not in ("community", "enterprise"):
-                ap.append(str(path))
+                for p in discover_addons_paths(path):
+                    ap.append(str(p))
         section = ["[[config]]", f'name = "Odoo Dev — {name}"',
                    f'odoo_path = "{comm}"', "addons_paths = ["]
         for p in ap:
@@ -757,6 +772,8 @@ def main() -> None:
 
     defaults = toml_data.get("_", {}).get("odoorc", {})
     odoorc_overrides = env_section.get("odoorc", {})
+    env_options = env_section.get("options", {})
+    skip_js_tooling: set[str] = set(env_options.get("skip_js_tooling", []))
 
     # Port: env odoorc → global default → fallback 8069; CLI flag overrides all
     port = args.port if args.port is not None else int(odoorc_overrides.get("port", defaults.get("port", 8069)))
@@ -820,7 +837,7 @@ def main() -> None:
         log_error("community worktree not available")
         sys.exit(1)
 
-    setup_js_tooling(worktree_paths)
+    setup_js_tooling(worktree_paths, skip_js_tooling)
 
     extra_worktrees = {repo: path for repo, path in worktree_paths.items() if repo != "community"}
     python_path, addons_path = build_paths(community_path, extra_worktrees)
