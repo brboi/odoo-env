@@ -270,7 +270,7 @@ class TestCmdStatusMissingWorktree:
         assert "community" in out
 
 
-class TestCmdCleanupDirtyCheck:
+class TestCmdRemoveDirtyCheck:
     def _make_bare(self, tmp_path: "Path", repo: str) -> "Path":
         """Create a minimal bare repo in CACHE_DIR."""
         bare = tmp_path / "cache" / f"{repo}.git"
@@ -279,7 +279,7 @@ class TestCmdCleanupDirtyCheck:
         return bare
 
     def test_dirty_worktree_is_skipped(self, mod, tmp_path, monkeypatch):
-        """cleanup skips a worktree that has staged (dirty) changes."""
+        """remove skips a worktree that has staged (dirty) changes."""
         monkeypatch.setattr(mod, "SRC_DIR", tmp_path)
         monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "cache")
         self._make_bare(tmp_path, "community")
@@ -293,8 +293,8 @@ class TestCmdCleanupDirtyCheck:
 
         toml_data = {"my-env": {"branches": {"community": "18.0"}}}
 
-        mod.cmd_cleanup(["my-env"], toml_data)
-        # Dirty worktree must survive — cleanup refused to remove it
+        mod.cmd_remove("my-env", toml_data)
+        # Dirty worktree must survive — remove refused to delete it
         assert worktree.is_dir()
 
     def test_clean_worktree_removal_is_attempted(self, mod, tmp_path, monkeypatch):
@@ -316,7 +316,7 @@ class TestCmdCleanupDirtyCheck:
 
         monkeypatch.setattr(mod, "git", tracking_git)
         toml_data = {"my-env": {"branches": {"community": "18.0"}}}
-        mod.cmd_cleanup(["my-env"], toml_data)
+        mod.cmd_remove("my-env", toml_data)
 
         # Assert that git worktree remove was called (not skipped due to dirty check)
         remove_calls = [c for c in git_calls if c[:2] == ("worktree", "remove")]

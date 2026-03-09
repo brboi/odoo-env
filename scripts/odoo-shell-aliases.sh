@@ -7,7 +7,7 @@
 
 _odoo_check_env() {
     if [ -z "$ODOO_PATH" ]; then
-        echo "[odoo-aliases] Not in an odoo-env shell. Run: odoo-env <env-name>" >&2
+        echo "[odoo-aliases] Not in an odoo-env shell. Run: odoo-env activate <env>" >&2
         return 1
     fi
 }
@@ -40,45 +40,9 @@ ocd-e() {
     cd "$ODOO_ENTERPRISE_PATH"
 }
 
-# Run git in community worktree
-ogit() {
-    _odoo_check_env || return 1
-    git -C "$ODOO_PATH" "$@"
-}
-
-# Tail Odoo log (reads log_file from odoorc)
-olog() {
-    _odoo_check_env || return 1
-    local logfile
-    logfile=$(python3 -c "
-import configparser, os
-c = configparser.ConfigParser()
-c.read(os.environ['ODOO_RC'])
-print(c.get('options', 'logfile', fallback=''))
-" 2>/dev/null)
-    if [ -n "$logfile" ]; then
-        tail -f "$logfile"
-    else
-        echo "[odoo-aliases] No logfile configured in \$ODOO_RC" >&2
-    fi
-}
-
-# psql with Odoo DB settings
-odb() {
-    _odoo_check_env || return 1
-    local db_host db_port db_user db_pass db_name
-    eval "$(python3 -c "
-import configparser, os
-c = configparser.ConfigParser()
-c.read(os.environ['ODOO_RC'])
-opts = c['options'] if 'options' in c else {}
-print('db_host=' + opts.get('db_host', 'localhost'))
-print('db_port=' + opts.get('db_port', '5432'))
-print('db_user=' + opts.get('db_user', 'odoo'))
-print('db_pass=' + opts.get('db_password', ''))
-print('db_name=' + opts.get('db_name', ''))
-" 2>/dev/null)"
-    PGPASSWORD="$db_pass" psql -h "$db_host" -p "$db_port" -U "$db_user" "${1:-$db_name}"
+# Switch to another environment without nesting shells
+oact() {
+    exec odoo-env activate "$@"
 }
 
 # Print current environment summary

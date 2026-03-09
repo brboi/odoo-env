@@ -2,25 +2,15 @@
 """odoo-env: Configure and launch an Odoo development environment.
 
 Usage:
-    odoo-env <env-name> [options]
-    odoo-env --list
-    odoo-env status [env]
-    odoo-env sync [env]
-    odoo-env cleanup [env] [--delete-branches]
+    odoo-env activate <env>   Set up worktrees and launch shell
+    odoo-env <env>            Shorthand for activate
+    odoo-env list             List environments from odoo-env.toml
+    odoo-env status           Git status (current env, or all if none active)
+    odoo-env rebase           Fetch + rebase (current env, or all if none active)
+    odoo-env remove <env>     Remove worktrees for an environment
 
 Environments are declared in odoo-env.toml at the repo root.
 Copy odoo-env.toml.example to odoo-env.toml and customize.
-
-Examples:
-    odoo-env my-project              # Set up worktrees and launch shell
-    odoo-env my-project --setup-only # Set up worktrees without launching shell
-    odoo-env my-project --odoorc     # Regenerate odoorc only, no shell
-    odoo-env --list                  # Show all environments from odoo-env.toml
-    odoo-env status                  # Show git status of all worktrees
-    odoo-env sync my-project         # Fetch + rebase worktrees onto upstream
-    odoo-env cleanup my-project      # Remove worktrees
-
-Options: --port, --setup-only, --odoorc, --print-env, --list
 """
 
 import argparse
@@ -629,7 +619,7 @@ def cmd_status(env_names: list[str], toml_data: dict) -> None:
             print(f"  {GREEN}{repo}{NC}@{current_branch}  {ab_str}{dirty_str}{pr_str}")
 
 
-def cmd_sync(env_names: list[str], toml_data: dict) -> None:
+def cmd_rebase(env_names: list[str], toml_data: dict) -> None:
     """Fetch bare repos and rebase tracking worktrees onto their upstream."""
     repos_to_fetch: set[str] = set()
     for env_name in env_names:
@@ -657,107 +647,79 @@ def cmd_sync(env_names: list[str], toml_data: dict) -> None:
                 log_warn(f"Detached HEAD in {worktree_path}, skipping rebase")
                 continue
 
-            log_info(f"Syncing {repo}@{branch}...")
+            log_info(f"Rebasing {repo}@{branch}...")
             result = git_wt(worktree_path, "rebase", "--autostash", "@{u}", check=False)
             if result.returncode != 0:
                 log_warn(f"Rebase failed for {repo}@{branch} — resolve manually")
             else:
-                log_ok(f"Synced: {repo}@{branch}")
+                log_ok(f"Rebased: {repo}@{branch}")
 
 
-def cmd_cleanup(env_names: list[str], toml_data: dict, delete_branches: bool = False) -> None:
-    """Remove worktrees for the given environments."""
-    for env_name in env_names:
-        repo_branches = _repo_branches_for_env(toml_data, env_name)
-        for repo, branch in repo_branches.items():
-            branch_dir = branch_to_dir(branch)
-            worktree_path = SRC_DIR / repo / branch_dir
-            bare_path = CACHE_DIR / f"{repo}.git"
+def cmd_remove(env_name: str, toml_data: dict) -> None:
+    """Remove worktrees for the given environment.
 
-            if not worktree_path.is_dir():
-                continue
+    Local feature branches are deleted automatically if no other environment
+    in odoo-env.toml uses the same branch for that repo.
+    """
+    repo_branches = _repo_branches_for_env(toml_data, env_name)
 
-            dirty = git_wt(worktree_path, "status", "--porcelain", check=False, capture=True)
-            if dirty.stdout.decode().strip():
-                log_error(f"Worktree is dirty, skipping: {worktree_path}")
-                log_info("Commit or stash your changes before running cleanup.")
-                continue
+    # Build set of (repo, branch) pairs used by other envs
+    other_branch_usage: set[tuple[str, str]] = set()
+    for other_name in list_envs(toml_data):
+        if other_name == env_name:
+            continue
+        for repo, branch in _repo_branches_for_env(toml_data, other_name).items():
+            other_branch_usage.add((repo, branch))
 
-            log_info(f"Removing worktree: {worktree_path}")
-            git(bare_path, "worktree", "remove", str(worktree_path), check=False)
+    for repo, branch in repo_branches.items():
+        branch_dir = branch_to_dir(branch)
+        worktree_path = SRC_DIR / repo / branch_dir
+        bare_path = CACHE_DIR / f"{repo}.git"
 
-            if delete_branches and stable_base(branch) is not None:
-                if local_branch_exists(bare_path, branch):
-                    log_info(f"Deleting local branch: {branch} in {repo}")
-                    git(bare_path, "branch", "-D", branch, check=False)
+        if not worktree_path.is_dir():
+            continue
+
+        dirty = git_wt(worktree_path, "status", "--porcelain", check=False, capture=True)
+        if dirty.stdout.decode().strip():
+            log_error(f"Worktree is dirty, skipping: {worktree_path}")
+            log_info("Commit or stash your changes before running remove.")
+            continue
+
+        log_info(f"Removing worktree: {worktree_path}")
+        git(bare_path, "worktree", "remove", str(worktree_path), check=False)
+
+        # Delete local feature branch if no other env uses it
+        if stable_base(branch) is not None and (repo, branch) not in other_branch_usage:
+            if local_branch_exists(bare_path, branch):
+                log_info(f"Deleting local branch: {branch} in {repo}")
+                git(bare_path, "branch", "-D", branch, check=False)
 
     # Prune stale worktree metadata from all bare repos
-    for repo in set(r for env in env_names for r in _repo_branches_for_env(toml_data, env)):
+    for repo in repo_branches:
         bare_path = CACHE_DIR / f"{repo}.git"
         if bare_path.is_dir():
             git(bare_path, "worktree", "prune", check=False)
 
 
-def run_subcommand(subcmd: str, argv: list[str]) -> None:
-    sub_parser = argparse.ArgumentParser(prog=f"odoo-env {subcmd}")
-    sub_parser.add_argument("env_names", nargs="*", help="Environment name(s), or omit for all")
-    if subcmd == "cleanup":
-        sub_parser.add_argument("--delete-branches", action="store_true",
-                                help="Also delete local feature branches")
-    args = sub_parser.parse_args(argv)
-
-    toml_data = load_odoo_env_toml()
-    env_names = args.env_names if args.env_names else list_envs(toml_data)
-
-    if subcmd == "status":
-        cmd_status(env_names, toml_data)
-    elif subcmd == "sync":
-        cmd_sync(env_names, toml_data)
-    elif subcmd == "cleanup":
-        cmd_cleanup(env_names, toml_data, getattr(args, "delete_branches", False))
+def cmd_list(toml_data: dict) -> None:
+    envs = list_envs(toml_data)
+    if envs:
+        print("Configured environments:")
+        for env_name in envs:
+            env_section = toml_data[env_name]
+            branches = env_section.get("branches", {})
+            repos_info = ", ".join(f"{r}@{b}" for r, b in branches.items())
+            print(f"  {GREEN}{env_name}{NC}  ({repos_info})")
+    else:
+        print("No environments configured in odoo-env.toml.")
 
 
-def main() -> None:
-    # Dispatch subcommands before the flat parser sees them
-    SUBCOMMANDS = {"sync", "cleanup", "status"}
-    if len(sys.argv) > 1 and sys.argv[1] in SUBCOMMANDS:
-        run_subcommand(sys.argv[1], sys.argv[2:])
-        return
+def cmd_activate(name: str, toml_data: dict) -> None:
+    current_env = os.environ.get("ODOO_ENV_NAME")
+    if current_env:
+        log_info(f"Switching from '{current_env}' to '{name}'...")
+        log_info("Tip: use `oact <env>` to switch without nesting")
 
-    parser = argparse.ArgumentParser(
-        description="Configure and launch an Odoo development environment",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
-    )
-    parser.add_argument("env_name", nargs="?", help="Environment name (e.g. my-project, fix-invoice)")
-    parser.add_argument("--list", action="store_true", help="List environments from odoo-env.toml")
-    parser.add_argument("--port", type=int, help="Override HTTP port for this run")
-    parser.add_argument("--setup-only", action="store_true", help="Create worktrees without launching shell")
-    parser.add_argument("--odoorc", action="store_true", help="Regenerate .cache/envs/{name}/odoorc from current settings, no shell")
-    parser.add_argument("--print-env", action="store_true", help="Print environment variables only")
-
-    args = parser.parse_args()
-
-    toml_data = load_odoo_env_toml()
-
-    if args.list:
-        envs = list_envs(toml_data)
-        if envs:
-            print("Configured environments:")
-            for env_name in envs:
-                env_section = toml_data[env_name]
-                branches = env_section.get("branches", {})
-                repos_info = ", ".join(f"{r}@{b}" for r, b in branches.items())
-                print(f"  {GREEN}{env_name}{NC}  ({repos_info})")
-        else:
-            print("No environments configured in odoo-env.toml.")
-        sys.exit(0)
-
-    if not args.env_name:
-        parser.print_help()
-        sys.exit(1)
-
-    name = args.env_name
     env_section = get_env(toml_data, name)
 
     default_branches: dict[str, str] = toml_data.get("_", {}).get("branches", {})
@@ -767,7 +729,6 @@ def main() -> None:
         log_error("'community' branch is required but not found in branches for this environment.")
         sys.exit(1)
 
-    # Custom repo URLs: merge global defaults + env-specific
     repo_urls = _repo_urls_for_env(toml_data, name)
 
     defaults = toml_data.get("_", {}).get("odoorc", {})
@@ -776,32 +737,10 @@ def main() -> None:
     env_options = env_section.get("options", {})
     skip_js_tooling: set[str] = set(global_options.get("skip_js_tooling", [])) | set(env_options.get("skip_js_tooling", []))
 
-    # Port: env odoorc → global default → fallback 8069; CLI flag overrides all
-    port = args.port if args.port is not None else int(odoorc_overrides.get("port", defaults.get("port", 8069)))
+    port = int(odoorc_overrides.get("port", defaults.get("port", 8069)))
 
     community_branch = repo_branches["community"]
     odoo_version = stable_base(community_branch) or community_branch
-
-    if args.odoorc:
-        # Use existing worktrees only — no fetch, no create
-        worktree_paths = {}
-        for repo, branch in repo_branches.items():
-            branch_dir = branch_to_dir(branch)
-            path = SRC_DIR / repo / branch_dir
-            if path.is_dir():
-                worktree_paths[repo] = path
-
-        community_path = worktree_paths.get("community")
-        if community_path is None:
-            log_error("Community worktree not found. Run without --odoorc to set up first.")
-            sys.exit(1)
-
-        extra_worktrees = {r: p for r, p in worktree_paths.items() if r != "community"}
-        python_path, addons_path = build_paths(community_path, extra_worktrees)
-        odoo_conf = build_odoo_conf(ROOT_DIR, addons_path, port, name, defaults, odoorc_overrides)
-        log_ok(f"Generated: {odoo_conf.relative_to(ROOT_DIR)}")
-        generate_odools_config(name, worktree_paths, python_path, toml_data)
-        sys.exit(0)
 
     log_info(f"Environment: {name}")
     for repo, branch in repo_branches.items():
@@ -864,22 +803,6 @@ def main() -> None:
         "PATH": str(community_path) + ":" + os.environ.get("PATH", ""),
     }
 
-    if args.print_env:
-        for key, value in env.items():
-            print(f'export {key}="{value}"')
-        sys.exit(0)
-
-    if args.setup_only:
-        log_ok("Setup complete!")
-        log_info(f"Community:  {community_path}")
-        log_info(f"Enterprise: {enterprise_path}")
-        debinstall = community_path / "setup" / "debinstall.sh"
-        if debinstall.is_file():
-            log_info(f"Run {debinstall}  # install Python deps via apt (Debian/Ubuntu)")
-        else:
-            log_info(f"Run: pip install -r {community_path}/requirements.txt")
-        sys.exit(0)
-
     print()
     log_ok("Environment ready!")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -898,7 +821,6 @@ def main() -> None:
     print("  pip install -r $ODOO_PATH/requirements.txt  # install Python deps through pip")
     print()
 
-    # Launch subshell — update process environment then exec
     os.environ.update(env)
 
     # Detect the actual running shell from the parent process (more reliable than $SHELL)
@@ -908,6 +830,56 @@ def main() -> None:
         shell = os.environ.get("SHELL", "/bin/sh")
     log_info("Launching subshell (exit to return)...")
     os.execv(shell, [shell, "-i"])
+
+
+def main() -> None:
+    SUBCOMMANDS = {"list", "activate", "status", "rebase", "remove"}
+
+    # Shortcut: odoo-env <env> → odoo-env activate <env>
+    if len(sys.argv) > 1 and sys.argv[1] not in SUBCOMMANDS and not sys.argv[1].startswith("-"):
+        sys.argv.insert(1, "activate")
+
+    parser = argparse.ArgumentParser(
+        prog="odoo-env",
+        description="Configure and launch an Odoo development environment",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    subparsers = parser.add_subparsers(dest="command", metavar="<command>")
+
+    subparsers.add_parser("list", help="List environments from odoo-env.toml")
+
+    sp_activate = subparsers.add_parser("activate", help="Set up worktrees and launch shell")
+    sp_activate.add_argument("env_name", help="Environment name")
+
+    subparsers.add_parser("status", help="Show git status of worktrees (current env, or all)")
+
+    subparsers.add_parser("rebase", help="Fetch and rebase worktrees onto upstream (current env, or all)")
+
+    sp_remove = subparsers.add_parser("remove", help="Remove worktrees for an environment")
+    sp_remove.add_argument("env_name", help="Environment name")
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        sys.exit(1)
+
+    toml_data = load_odoo_env_toml()
+
+    if args.command == "list":
+        cmd_list(toml_data)
+    elif args.command == "activate":
+        cmd_activate(args.env_name, toml_data)
+    elif args.command == "status":
+        env_name = os.environ.get("ODOO_ENV_NAME")
+        env_names = [env_name] if env_name else list_envs(toml_data)
+        cmd_status(env_names, toml_data)
+    elif args.command == "rebase":
+        env_name = os.environ.get("ODOO_ENV_NAME")
+        env_names = [env_name] if env_name else list_envs(toml_data)
+        cmd_rebase(env_names, toml_data)
+    elif args.command == "remove":
+        cmd_remove(args.env_name, toml_data)
 
 
 if __name__ == "__main__":
