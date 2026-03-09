@@ -80,6 +80,20 @@ Copy `odoo-env.toml.example` to get started and edit it to define your environme
 `status` and `rebase` use the current active environment (detected via `$ODOO_ENV_NAME`)
 when run inside an active shell, and operate on all environments otherwise.
 
+### Tab completion
+
+Tab completion for subcommands and environment names (optional, requires `argcomplete`):
+
+```bash
+pip install argcomplete
+
+# Bash/Zsh — add to ~/.bashrc or ~/.zshrc:
+eval "$(register-python-argcomplete odoo-env)"
+
+# Fish — run once:
+register-python-argcomplete --shell fish odoo-env > ~/.config/fish/completions/odoo-env.fish
+```
+
 ## Git workflow with worktrees
 
 Each branch lives in its own directory — no `git checkout` to switch context.
