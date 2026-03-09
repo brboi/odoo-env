@@ -80,3 +80,87 @@ class TestGenerateOdoolsConfig:
         content = (tmp_path / "odools.toml").read_text()
         assert "Auto-generated" in content
         assert "do not edit" in content
+
+
+class TestGenerateOdoolsConfigMultiEnv:
+    def _toml_data(self, envs: dict[str, str]) -> dict:
+        """Build minimal toml_data with {env_name: community_branch} mapping."""
+        data: dict = {}
+        for env_name, community_branch in envs.items():
+            data[env_name] = {"branches": {"community": community_branch}}
+        return data
+
+    def test_active_env_appears_first(self, mod, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
+        monkeypatch.setattr(mod, "SRC_DIR", tmp_path / "src")
+        community_active = tmp_path / "src" / "community" / "18.0"
+        community_other = tmp_path / "src" / "community" / "master"
+        community_active.mkdir(parents=True)
+        community_other.mkdir(parents=True)
+
+        toml_data = self._toml_data({"prod": "18.0", "dev": "master"})
+        mod.generate_odools_config(
+            "prod", {"community": community_active}, "/py", toml_data
+        )
+
+        content = (tmp_path / "odools.toml").read_text()
+        assert content.index('name = "Odoo Dev — prod"') < content.index('name = "Odoo Dev — dev"')
+
+    def test_secondary_env_included_when_worktree_exists(self, mod, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
+        monkeypatch.setattr(mod, "SRC_DIR", tmp_path / "src")
+        community_active = tmp_path / "src" / "community" / "18.0"
+        community_other = tmp_path / "src" / "community" / "master"
+        community_active.mkdir(parents=True)
+        community_other.mkdir(parents=True)
+
+        toml_data = self._toml_data({"prod": "18.0", "dev": "master"})
+        mod.generate_odools_config(
+            "prod", {"community": community_active}, "/py", toml_data
+        )
+
+        content = (tmp_path / "odools.toml").read_text()
+        assert content.count("[[config]]") == 2
+        assert 'name = "Odoo Dev — dev"' in content
+
+    def test_secondary_env_skipped_when_community_missing(self, mod, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
+        monkeypatch.setattr(mod, "SRC_DIR", tmp_path / "src")
+        community_active = tmp_path / "src" / "community" / "18.0"
+        community_active.mkdir(parents=True)
+        # community/master intentionally NOT created
+
+        toml_data = self._toml_data({"prod": "18.0", "dev": "master"})
+        mod.generate_odools_config(
+            "prod", {"community": community_active}, "/py", toml_data
+        )
+
+        content = (tmp_path / "odools.toml").read_text()
+        assert content.count("[[config]]") == 1
+        assert 'name = "Odoo Dev — dev"' not in content
+
+    def test_no_toml_data_produces_single_section(self, mod, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
+        community = tmp_path / "src" / "community" / "18.0"
+        community.mkdir(parents=True)
+
+        mod.generate_odools_config("my-env", {"community": community}, "/py")
+
+        content = (tmp_path / "odools.toml").read_text()
+        assert content.count("[[config]]") == 1
+
+    def test_active_env_not_duplicated(self, mod, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
+        monkeypatch.setattr(mod, "SRC_DIR", tmp_path / "src")
+        community_active = tmp_path / "src" / "community" / "18.0"
+        community_other = tmp_path / "src" / "community" / "master"
+        community_active.mkdir(parents=True)
+        community_other.mkdir(parents=True)
+
+        toml_data = self._toml_data({"prod": "18.0", "dev": "master"})
+        mod.generate_odools_config(
+            "prod", {"community": community_active}, "/py", toml_data
+        )
+
+        content = (tmp_path / "odools.toml").read_text()
+        assert content.count('name = "Odoo Dev — prod"') == 1
