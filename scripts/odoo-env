@@ -576,7 +576,7 @@ def generate_vscode_workspace(
                 "**/__pycache__": True,
                 "**/*.pyc": True,
             },
-            "Odoo.selectedConfiguration": f"Odoo Dev \u2014 {name}",
+            "Odoo.selectedProfile": f"Odoo Dev — {name}",
             "terminal.integrated.env.linux": terminal_env,
             "terminal.integrated.env.osx": terminal_env,
         },
