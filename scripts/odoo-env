@@ -460,6 +460,10 @@ def build_odoo_conf(root_dir: Path, addons_path: str, port: int, name: str, defa
     if "db_name" not in cfg["options"]:
         cfg["options"]["db_name"] = name
 
+    # Default db_name to env name if not explicitly set in defaults or overrides
+    if "dbfilter" not in cfg["options"]:
+        cfg["options"]["dbfilter"] = f"^{cfg['options']['db_name']}$"
+
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
         cfg.write(f)
@@ -544,7 +548,6 @@ def generate_vscode_workspace(
     name: str,
     worktree_paths: dict[str, Path],
     env: dict[str, str],
-    python_path: str,
     odoo_rc_path: str,
 ) -> Path:
     """Generate a VS Code .code-workspace file for the environment."""
@@ -556,18 +559,47 @@ def generate_vscode_workspace(
     for repo, path in worktree_paths.items():
         rel = os.path.relpath(path, env_dir)
         folders.append({"name": repo, "path": rel})
+    folders.append({"name": "odoo-env", "path": os.path.relpath(ROOT_DIR, env_dir)})
 
     venv_python = str(ROOT_DIR / ".venv" / "bin" / "python3")
 
     # Terminal env vars: all non-empty entries from env dict
     terminal_env = {k: v for k, v in env.items() if v}
 
+    # Launch config env: same as activate, minus PATH (would clobber system PATH),
+    # with workspace-relative substitutions where possible.
+    launch_env = {k: v for k, v in env.items() if v and k != "PATH"}
+    launch_env["PYTHONPATH"] = "${workspaceFolder:community}"
+    launch_env["ODOO_PATH"] = "${workspaceFolder:community}"
+
+    def _launch_config(label: str, args: list) -> dict:
+        return {
+            "name": label,
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder:community}",
+            "program": "odoo-bin",
+            "justMyCode": False,
+            "pythonArgs": ["-Xfrozen_modules=off"],
+            "args": args,
+            "env": launch_env,
+        }
+
     workspace = {
         "folders": folders,
         "settings": {
             "python.defaultInterpreterPath": venv_python,
             "search.useIgnoreFiles": False,
+            "[python]": {
+                "editor.defaultFormatter": "charliermarsh.ruff"
+            },
             "files.exclude": {
+                "**/__pycache__": True,
+                "**/*.pyc": True,
+                "**/node_modules": True,
+            },
+            "search.exclude": {
                 "**/__pycache__": True,
                 "**/*.pyc": True,
                 "**/node_modules": True,
@@ -579,16 +611,28 @@ def generate_vscode_workspace(
         "launch": {
             "version": "0.2.0",
             "configurations": [
+                _launch_config("Start Odoo", [
+                    f"--config={odoo_rc_path}",
+                    "--dev=all",
+                ]),
+                _launch_config("Start Debug Shell", [
+                    "shell",
+                    f"--config={odoo_rc_path}",
+                    "--dev=all",
+                ]),
+                _launch_config("Run Console Tests", [
+                    f"--config={odoo_rc_path}",
+                    "--dev=all",
+                    "--test-enable",
+                    "--test-tags=${input:odooTestTags}",
+                    "--stop-after-init",
+                ]),
+            ],
+            "inputs": [
                 {
-                    "name": f"Odoo: {name}",
-                    "type": "debugpy",
-                    "request": "launch",
-                    "program": "${workspaceFolder:community}/odoo-bin",
-                    "args": ["-c", odoo_rc_path],
-                    "env": {
-                        "ODOO_ENV_NAME": name,
-                        "PYTHONPATH": python_path,
-                    },
+                    "id": "odooTestTags",
+                    "type": "promptString",
+                    "description": "Choose a type of tests. Prefixes are: <none> for tags, / for modules, : for classes, . for methods.",
                 }
             ],
         },
@@ -622,7 +666,7 @@ def generate_zed_workspace(
     settings = {
         "tab_size": 4,
         "lsp": {
-            "pyright": {
+            "basedpyright": {
                 "settings": {
                     "python.pythonPath": venv_python,
                 }
@@ -1101,7 +1145,7 @@ def cmd_activate(name: str, toml_data: dict) -> None:
         "ODOO_ENV_NAME": name,
         "ODOO_VERSION": odoo_version,
         "ODOO_RC": str(odoo_conf),
-        "PYTHONPATH": python_path + (":" + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else ""),
+        "PYTHONPATH": python_path,
         "ODOO_ADDONS_PATH": addons_path,
         "ODOO_PORT": str(port),
         "ODOO_PATH": str(community_path),
@@ -1111,7 +1155,7 @@ def cmd_activate(name: str, toml_data: dict) -> None:
     }
 
     env_dir = ROOT_DIR / ".cache" / "envs" / name
-    vscode_ws = generate_vscode_workspace(name, worktree_paths, env, python_path, str(odoo_conf))
+    vscode_ws = generate_vscode_workspace(name, worktree_paths, env, str(odoo_conf))
     generate_zed_workspace(name, worktree_paths, env)
     generate_idea_project(name, worktree_paths, env)
 
@@ -1135,7 +1179,7 @@ def cmd_activate(name: str, toml_data: dict) -> None:
     print("  odoo-bin -c $ODOO_RC -d mydb")
     debinstall = community_path / "setup" / "debinstall.sh"
     if debinstall.is_file():
-        print(f"  $ODOO_PATH/setup/debinstall.sh  # install Python deps via apt (recommended) (Debian/Ubuntu)")
+        print("  $ODOO_PATH/setup/debinstall.sh  # install Python deps via apt (recommended) (Debian/Ubuntu)")
     print("  pip install -r $ODOO_PATH/requirements.txt  # install Python deps through pip")
     print()
 

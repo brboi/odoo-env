@@ -4,13 +4,11 @@ from pathlib import Path
 
 
 class TestGenerateVscodeWorkspace:
-    def _call(self, mod, tmp_path, worktree_paths, name="master", env=None, python_path=None, odoo_rc=None):
-        community = worktree_paths.get("community")
+    def _call(self, mod, tmp_path, worktree_paths, name="master", env=None, odoo_rc=None):
         return mod.generate_vscode_workspace(
             name,
             worktree_paths,
             env or {"ODOO_ENV_NAME": name},
-            python_path or str(community),
             odoo_rc or "/tmp/odoorc",
         )
 
@@ -75,7 +73,7 @@ class TestGenerateVscodeWorkspace:
         out = self._call(mod, tmp_path, {"community": community}, name="my-env")
 
         data = json.loads(out.read_text())
-        assert data["settings"]["Odoo.selectedConfiguration"] == "Odoo Dev \u2014 my-env"
+        assert data["settings"]["Odoo.selectedProfile"] == "Odoo Dev \u2014 my-env"
 
     def test_launch_configuration(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
@@ -86,10 +84,13 @@ class TestGenerateVscodeWorkspace:
 
         data = json.loads(out.read_text())
         configs = data["launch"]["configurations"]
-        assert len(configs) == 1
-        assert configs[0]["name"] == "Odoo: master"
-        assert configs[0]["type"] == "debugpy"
-        assert "/path/to/my-odoorc" in configs[0]["args"]
+        assert len(configs) == 3
+        names = [c["name"] for c in configs]
+        assert "Start Odoo" in names
+        assert "Start Debug Shell" in names
+        assert "Run Console Tests" in names
+        assert all(c["type"] == "debugpy" for c in configs)
+        assert all(any("/path/to/my-odoorc" in a for a in c["args"]) for c in configs)
 
     def test_terminal_env_vars(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
@@ -211,7 +212,7 @@ class TestGenerateZedWorkspace:
 
         settings_path = tmp_path / ".cache" / "envs" / "master" / ".zed" / "settings.json"
         data = json.loads(settings_path.read_text())
-        venv_python = data["lsp"]["pyright"]["settings"]["python.pythonPath"]
+        venv_python = data["lsp"]["basedpyright"]["settings"]["python.pythonPath"]
         assert ".venv" in venv_python
 
 
