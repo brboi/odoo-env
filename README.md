@@ -50,6 +50,9 @@ xargs sudo apt install -y < apt-system-deps.txt
 # RTL CSS support
 npm install -g rtlcss
 
+# inotify support to reload your odoo server when python changes
+sudo apt install python3-inotify
+
 # PDF generation (Debian/Ubuntu only)
 install-wkhtmltopdf
 ```

@@ -1,6 +1,7 @@
 {
   "recommendations": [
     "anthropic.claude-code",
+    "charliermarsh.ruff",
     "odoo.owl-vision",
     "odoo.odoo",
     "ms-python.python"

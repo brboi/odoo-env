@@ -15,7 +15,7 @@
 port = 8069
 admin_passwd = "Password"
 server_wide_modules = "base,web"
-data_dir = ".cache/odoo"
+# data_dir = "/var/odoo-data"
 db_host = "postgres"
 db_port = 5432
 db_user = "odoo"
