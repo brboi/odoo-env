@@ -567,14 +567,10 @@ def generate_vscode_workspace(
         "settings": {
             "python.defaultInterpreterPath": venv_python,
             "search.useIgnoreFiles": False,
-            "search.exclude": {
-                "**/__pycache__": True,
-                "**/*.pyc": True,
-                "**/node_modules": True,
-            },
             "files.exclude": {
                 "**/__pycache__": True,
                 "**/*.pyc": True,
+                "**/node_modules": True,
             },
             "Odoo.selectedProfile": f"Odoo Dev — {name}",
             "terminal.integrated.env.linux": terminal_env,
