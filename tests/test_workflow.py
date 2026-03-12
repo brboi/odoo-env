@@ -3,6 +3,23 @@ from pathlib import Path
 import subprocess
 import os
 
+from oo.config import Config, Profile, BranchSpec
+
+
+def _make_config(profiles_spec: dict[str, dict[str, str]],
+                 remotes: dict | None = None) -> Config:
+    """Helper: {env_name: {repo: branch_spec_str}} → Config."""
+    profiles = [
+        Profile(
+            name=name,
+            branch_specs={repo: BranchSpec.parse(b) for repo, b in branches.items()},
+            odoorc={},
+            options={},
+        )
+        for name, branches in profiles_spec.items()
+    ]
+    return Config(profiles=profiles, odoorc={}, remotes=remotes or {}, options={})
+
 
 def _make_bare(tmp_path: Path, repo: str) -> Path:
     """Create a minimal bare repo with an initial commit."""
@@ -139,8 +156,8 @@ class TestCmdStatusPrBranch:
             check=True, capture_output=True,
         )
 
-        toml_data = {"my-env": {"branches": {"enterprise": "pr/1261"}}}
-        mod.cmd_status(["my-env"], toml_data)
+        config = _make_config({"my-env": {"enterprise": "pr/1261"}})
+        mod.cmd_status(["my-env"], config)
         out = capsys.readouterr().out
         assert "not created" in out
         assert "https://github.com/odoo/enterprise/pull/1261" in out
@@ -152,8 +169,8 @@ class TestCmdStatusPrBranch:
 
         _make_bare(tmp_path / "cache", "enterprise")
 
-        toml_data = {"my-env": {"branches": {"enterprise": "odoo-dev/enterprise#1261"}}}
-        mod.cmd_status(["my-env"], toml_data)
+        config = _make_config({"my-env": {"enterprise": "odoo-dev/enterprise#1261"}})
+        mod.cmd_status(["my-env"], config)
         out = capsys.readouterr().out
         assert "not created" in out
         assert "https://github.com/odoo-dev/enterprise/pull/1261" in out
@@ -163,56 +180,50 @@ class TestCmdStatusPrBranch:
         monkeypatch.setattr(mod, "SRC_DIR", tmp_path / "src")
         monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "cache")
 
-        toml_data = {"my-env": {"branches": {"community": "18.0"}}}
-        mod.cmd_status(["my-env"], toml_data)
+        config = _make_config({"my-env": {"community": "18.0"}})
+        mod.cmd_status(["my-env"], config)
         out = capsys.readouterr().out
         assert "github.com" not in out
         assert "not created" in out
 
 
 class TestRepoUrls:
-    def test_default_repos_merged(self, mod):
-        toml_data = {
-            "_": {"repos": {"utils": "git@github.com:myco/utils.git"}},
-            "my-env": {"branches": {"community": "18.0"}},
-        }
-        urls = mod._repo_urls_for_env(toml_data, "my-env")
+    def test_remote_url_returned_for_repo_in_profile(self, mod):
+        config = _make_config(
+            {"my-env": {"community": "18.0", "utils": "main"}},
+            remotes={"utils": {"origin": "git@github.com:myco/utils.git"}},
+        )
+        urls = mod.profile_remote_urls(config, "my-env")
         assert urls["utils"] == "git@github.com:myco/utils.git"
 
-    def test_env_repos_override_default(self, mod):
-        toml_data = {
-            "_": {"repos": {"addons": "git@github.com:default/addons.git"}},
-            "my-env": {
-                "branches": {"community": "18.0"},
-                "repos": {"addons": "git@github.com:override/addons.git"},
-            },
-        }
-        urls = mod._repo_urls_for_env(toml_data, "my-env")
+    def test_remote_url_from_config_remotes(self, mod):
+        config = _make_config(
+            {"my-env": {"community": "18.0", "addons": "main"}},
+            remotes={"addons": {"origin": "git@github.com:override/addons.git"}},
+        )
+        urls = mod.profile_remote_urls(config, "my-env")
         assert urls["addons"] == "git@github.com:override/addons.git"
 
-    def test_no_repos_section_returns_empty(self, mod):
-        toml_data = {"my-env": {"branches": {"community": "18.0"}}}
-        urls = mod._repo_urls_for_env(toml_data, "my-env")
+    def test_no_remotes_returns_empty(self, mod):
+        config = _make_config({"my-env": {"community": "18.0"}})
+        urls = mod.profile_remote_urls(config, "my-env")
         assert urls == {}
 
 
 class TestRepoBranches:
-    def test_default_branches_merged(self, mod):
-        toml_data = {
-            "_": {"branches": {"community": "18.0", "enterprise": "18.0"}},
-            "my-env": {},
-        }
-        branches = mod._repo_branches_for_env(toml_data, "my-env")
-        assert branches["community"] == "18.0"
-        assert branches["enterprise"] == "18.0"
+    def test_profile_returns_its_own_branches(self, mod):
+        config = _make_config({"my-env": {"community": "18.0", "enterprise": "18.0"}})
+        specs = mod.profile_branch_specs(config, "my-env")
+        assert specs["community"].branch == "18.0"
+        assert specs["enterprise"].branch == "18.0"
 
-    def test_env_branches_override_default(self, mod):
-        toml_data = {
-            "_": {"branches": {"community": "18.0"}},
-            "my-env": {"branches": {"community": "17.0"}},
-        }
-        branches = mod._repo_branches_for_env(toml_data, "my-env")
-        assert branches["community"] == "17.0"
+    def test_profiles_branches_are_independent(self, mod):
+        config = _make_config({
+            "profile-a": {"community": "18.0"},
+            "profile-b": {"community": "17.0"},
+        })
+        assert mod.profile_branch_specs(config, "profile-a")["community"].branch == "18.0"
+        assert mod.profile_branch_specs(config, "profile-b")["community"].branch == "17.0"
 
 
 class TestLocalBranchExists:
@@ -261,10 +272,8 @@ class TestLocalBranchExists:
 class TestCmdStatusMissingWorktree:
     def test_missing_worktree_shows_not_created(self, mod, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(mod, "SRC_DIR", tmp_path)
-        toml_data = {
-            "my-env": {"branches": {"community": "18.0"}},
-        }
-        mod.cmd_status(["my-env"], toml_data)
+        config = _make_config({"my-env": {"community": "18.0"}})
+        mod.cmd_status(["my-env"], config)
         out = capsys.readouterr().out
         assert "not created" in out
         assert "community" in out
@@ -291,14 +300,16 @@ class TestCmdRemoveDirtyCheck:
         subprocess.run(["git", "-C", str(worktree), "add", "dirty.txt"],
                        check=True, capture_output=True)
 
-        toml_data = {"my-env": {"branches": {"community": "18.0"}}}
+        config = _make_config({"my-env": {"community": "18.0"}})
 
-        mod.cmd_remove("my-env", toml_data)
+        mod.cmd_remove("my-env", config)
         # Dirty worktree must survive — remove refused to delete it
         assert worktree.is_dir()
 
     def test_clean_worktree_removal_is_attempted(self, mod, tmp_path, monkeypatch):
         """For a clean worktree, git worktree remove is called (not skipped)."""
+        import oo.git as git_mod
+
         monkeypatch.setattr(mod, "SRC_DIR", tmp_path)
         monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "cache")
         self._make_bare(tmp_path, "community")
@@ -308,15 +319,15 @@ class TestCmdRemoveDirtyCheck:
         subprocess.run(["git", "init", str(worktree)], check=True, capture_output=True)
 
         git_calls: list[tuple] = []
-        original_git = mod.git
+        original_git = git_mod.git
 
         def tracking_git(bare_path, *args, check=True, capture=False):
             git_calls.append(args)
             return original_git(bare_path, *args, check=False, capture=capture)
 
-        monkeypatch.setattr(mod, "git", tracking_git)
-        toml_data = {"my-env": {"branches": {"community": "18.0"}}}
-        mod.cmd_remove("my-env", toml_data)
+        monkeypatch.setattr(git_mod, "git", tracking_git)
+        config = _make_config({"my-env": {"community": "18.0"}})
+        mod.cmd_remove("my-env", config)
 
         # Assert that git worktree remove was called (not skipped due to dirty check)
         remove_calls = [c for c in git_calls if c[:2] == ("worktree", "remove")]
