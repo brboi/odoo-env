@@ -127,7 +127,7 @@ def generate_vscode_workspace(
 ) -> Path:
     """Generate a VS Code .code-workspace file for the environment."""
     from oo.ui import log_ok
-    env_dir = _pkg.ROOT_DIR / ".cache" / "envs" / name
+    env_dir = _pkg.ROOT_DIR / "workspaces" / name / "vscode"
     out = env_dir / f"{name}.code-workspace"
 
     folders = []
@@ -220,11 +220,12 @@ def generate_zed_workspace(
     worktree_paths: dict[str, Path],
     env: dict[str, str],
 ) -> None:
-    """Generate Zed workspace: symlinks to worktrees + .zed/settings.json."""
+    """Generate Zed workspace: symlinks, .zed/settings.json, tasks.json, launch.json."""
     from oo.ui import log_ok
-    env_dir = _pkg.ROOT_DIR / ".cache" / "envs" / name
+    env_dir = _pkg.ROOT_DIR / "workspaces" / name / "zed"
     env_dir.mkdir(parents=True, exist_ok=True)
 
+    # Symlinks for each worktree
     for repo, path in worktree_paths.items():
         link = env_dir / repo
         if link.exists() or link.is_symlink():
@@ -232,25 +233,47 @@ def generate_zed_workspace(
         rel = os.path.relpath(path, env_dir)
         link.symlink_to(rel)
 
+    # Symlink: odoo-env → ROOT_DIR (access to oo scripts, configs, etc.)
+    odoo_env_link = env_dir / "odoo-env"
+    if odoo_env_link.exists() or odoo_env_link.is_symlink():
+        odoo_env_link.unlink()
+    odoo_env_link.symlink_to(os.path.relpath(_pkg.ROOT_DIR, env_dir))
+
+    # Symlink: odoorc → ../odoorc (shared odoo config)
+    odoorc_link = env_dir / "odoorc"
+    if odoorc_link.exists() or odoorc_link.is_symlink():
+        odoorc_link.unlink()
+    odoorc_link.symlink_to("../odoorc")
+
+    venv_dir = str(_pkg.ROOT_DIR / ".venv")
     venv_python = str(_pkg.ROOT_DIR / ".venv" / "bin" / "python3")
+    venv_bin = str(_pkg.ROOT_DIR / ".venv" / "bin")
+
+    terminal_env = {k: v for k, v in env.items() if v}
+    terminal_env["VIRTUAL_ENV"] = venv_dir
+    terminal_env["PATH"] = venv_bin + ":" + terminal_env.get("PATH", "")
+
     settings = {
         "tab_size": 4,
         "lsp": {
             "basedpyright": {
                 "settings": {
                     "python.pythonPath": venv_python,
+                    "python.venvPath": str(_pkg.ROOT_DIR),
+                    "python.venv": ".venv",
                 }
-            }
+            },
+            "odoo-ls": {
+                "binary": {
+                    "path": str(_pkg.ROOT_DIR / ".venv" / "bin" / "odoo-ls"),
+                    "arguments": [],
+                },
+                "settings": {
+                    "Odoo.selectedProfile": f"Odoo Dev \u2014 {name}",
+                },
+            },
         },
-        "terminal": {
-            "env": {
-                "ODOO_ENV_NAME": env.get("ODOO_ENV_NAME", name),
-                "ODOO_RC": env.get("ODOO_RC", ""),
-                "PYTHONPATH": env.get("PYTHONPATH", ""),
-                "ODOO_PATH": env.get("ODOO_PATH", ""),
-                "COMMUNITY": env.get("COMMUNITY", ""),
-            }
-        },
+        "terminal": {"env": terminal_env},
         "file_scan_exclusions": [
             "**/__pycache__",
             "**/node_modules",
@@ -258,64 +281,99 @@ def generate_zed_workspace(
         ],
     }
 
+    odoo_rc = env.get("ODOO_RC", "")
+    community = env.get("COMMUNITY", "")
+    odoo_bin = community + "/odoo-bin"
+
+    tasks = [
+        {
+            "label": "Start Odoo",
+            "command": "python",
+            "args": [odoo_bin, f"--config={odoo_rc}", "--dev=all"],
+            "cwd": community,
+            "use_new_terminal": False,
+            "allow_concurrent_runs": False,
+            "reveal": "always",
+        },
+        {
+            "label": "Start Debug Shell",
+            "command": "python",
+            "args": [odoo_bin, "shell", f"--config={odoo_rc}", "--dev=all"],
+            "cwd": community,
+            "use_new_terminal": False,
+            "allow_concurrent_runs": False,
+            "reveal": "always",
+        },
+        {
+            "label": "Run Console Tests",
+            "command": "python",
+            "args": [
+                odoo_bin,
+                f"--config={odoo_rc}",
+                "--dev=all",
+                "--test-enable",
+                "--test-tags=",
+                "--stop-after-init",
+            ],
+            "cwd": community,
+            "use_new_terminal": False,
+            "allow_concurrent_runs": False,
+            "reveal": "always",
+        },
+    ]
+
+    launch_env = {k: v for k, v in env.items() if v and k != "PATH"}
+    launch = {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "Debug Odoo",
+                "type": "debugpy",
+                "request": "launch",
+                "console": "integratedTerminal",
+                "cwd": community,
+                "program": odoo_bin,
+                "justMyCode": False,
+                "pythonArgs": ["-Xfrozen_modules=off"],
+                "args": [f"--config={odoo_rc}", "--dev=all"],
+                "env": launch_env,
+            },
+            {
+                "name": "Debug Shell",
+                "type": "debugpy",
+                "request": "launch",
+                "console": "integratedTerminal",
+                "cwd": community,
+                "program": odoo_bin,
+                "justMyCode": False,
+                "pythonArgs": ["-Xfrozen_modules=off"],
+                "args": ["shell", f"--config={odoo_rc}", "--dev=all"],
+                "env": launch_env,
+            },
+            {
+                "name": "Run Console Tests",
+                "type": "debugpy",
+                "request": "launch",
+                "console": "integratedTerminal",
+                "cwd": community,
+                "program": odoo_bin,
+                "justMyCode": False,
+                "pythonArgs": ["-Xfrozen_modules=off"],
+                "args": [
+                    f"--config={odoo_rc}",
+                    "--dev=all",
+                    "--test-enable",
+                    "--test-tags=",
+                    "--stop-after-init",
+                ],
+                "env": launch_env,
+            },
+        ],
+    }
+
     zed_dir = env_dir / ".zed"
     zed_dir.mkdir(parents=True, exist_ok=True)
-    zed_settings = zed_dir / "settings.json"
-    zed_settings.write_text(json.dumps(settings, indent=2))
-    log_ok(f"Generated: {zed_settings.relative_to(_pkg.ROOT_DIR)}")
-
-
-def generate_idea_project(
-    name: str,
-    worktree_paths: dict[str, Path],
-    env: dict[str, str],
-) -> None:
-    """Generate a minimal JetBrains/PyCharm project in .cache/envs/{name}/.idea/."""
-    from oo.ui import log_ok
-    env_dir = _pkg.ROOT_DIR / ".cache" / "envs" / name
-    idea_dir = env_dir / ".idea"
-    idea_dir.mkdir(parents=True, exist_ok=True)
-
-    iml_name = f"odoo-{name}.iml"
-    (idea_dir / ".name").write_text(f"odoo-{name}")
-
-    (idea_dir / "modules.xml").write_text(
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<project version="4">\n'
-        '  <component name="ProjectModuleManager">\n'
-        '    <modules>\n'
-        f'      <module fileurl="file://$PROJECT_DIR$/.idea/{iml_name}" filepath="$PROJECT_DIR$/.idea/{iml_name}" />\n'
-        '    </modules>\n'
-        '  </component>\n'
-        '</project>\n'
-    )
-
-    (idea_dir / "misc.xml").write_text(
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<project version="4">\n'
-        '  <component name="ProjectRootManager" version="2"'
-        ' project-jdk-name="Python 3.12 (odoo-env)" project-jdk-type="Python SDK" />\n'
-        '</project>\n'
-    )
-
-    content_root_lines: list[str] = []
-    for repo, path in worktree_paths.items():
-        content_root_lines.append(f'    <content url="file://{path}">')
-        content_root_lines.append(f'      <excludeFolder url="file://{path}/node_modules" />')
-        content_root_lines.append(f'      <excludeFolder url="file://{path}/__pycache__" />')
-        content_root_lines.append('    </content>')
-
-    content_roots_str = "\n".join(content_root_lines)
-    (idea_dir / iml_name).write_text(
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<module type="PYTHON_MODULE" version="4">\n'
-        '  <component name="NewModuleRootManager" inherit-compiler-output="true">\n'
-        '    <exclude-output />\n'
-        f'{content_roots_str}\n'
-        '    <orderEntry type="inheritedJdk" />\n'
-        '    <orderEntry type="sourceFolder" forTests="false" />\n'
-        '  </component>\n'
-        '</module>\n'
-    )
-
-    log_ok(f"Generated: {idea_dir.relative_to(_pkg.ROOT_DIR)}")
+    (zed_dir / "settings.json").write_text(json.dumps(settings, indent=2))
+    (zed_dir / "tasks.json").write_text(json.dumps(tasks, indent=2))
+    (zed_dir / "launch.json").write_text(json.dumps(launch, indent=2))
+    log_ok(f"Generated: {(zed_dir / 'settings.json').relative_to(_pkg.ROOT_DIR)}")

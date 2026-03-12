@@ -28,7 +28,7 @@ from oo.git import (
 )
 from oo.workspace import (
     build_paths, generate_vscode_workspace, generate_zed_workspace,
-    generate_idea_project, generate_odools_config, profile_worktree_paths,
+    generate_odools_config, profile_worktree_paths,
 )
 from oo.shell import build_odoo_conf, launch_shell
 from oo.ui import log_info, log_ok, log_warn, log_error, GREEN, BLUE, YELLOW, RED, NC, hyperlink
@@ -214,11 +214,11 @@ def cmd_remove(profile_name: str, config: Config, force: bool = False) -> None:
         if bare_path.is_dir():
             _git.git(bare_path, "worktree", "prune", check=False)
 
-    env_dir = _pkg.ROOT_DIR / ".cache" / "envs" / profile_name
-    if env_dir.is_dir() and removed_repos:
+    ws_dir = _pkg.ROOT_DIR / "workspaces" / profile_name
+    if ws_dir.is_dir() and removed_repos:
         import shutil
-        shutil.rmtree(env_dir)
-        log_ok(f"Removed cache: {env_dir.relative_to(_pkg.ROOT_DIR)}")
+        shutil.rmtree(ws_dir)
+        log_ok(f"Removed workspace: {ws_dir.relative_to(_pkg.ROOT_DIR)}")
 
 
 def cmd_gen(profile_name: str, config: Config, ide: str) -> None:
@@ -273,8 +273,6 @@ def cmd_gen(profile_name: str, config: Config, ide: str) -> None:
         generate_vscode_workspace(profile_name, worktree_paths, env, str(odoo_conf))
     if ide in ("zed", "all"):
         generate_zed_workspace(profile_name, worktree_paths, env)
-    if ide in ("jetbrains", "all"):
-        generate_idea_project(profile_name, worktree_paths, env)
     if ide == "all":
         generate_odools_config(profile_name, worktree_paths, python_path, config)
 
@@ -371,10 +369,11 @@ def cmd_activate(profile_name: str, config: Config) -> None:
         if repo not in ("community", "enterprise"):
             env[repo.upper().replace("-", "_")] = str(path)
 
-    env_dir = _pkg.ROOT_DIR / ".cache" / "envs" / profile_name
     vscode_ws = generate_vscode_workspace(profile_name, worktree_paths, env, str(odoo_conf))
     generate_zed_workspace(profile_name, worktree_paths, env)
-    generate_idea_project(profile_name, worktree_paths, env)
+
+    ws_dir = _pkg.ROOT_DIR / "workspaces" / profile_name
+    zed_dir = ws_dir / "zed"
 
     print()
     log_ok("Environment ready!")
@@ -385,11 +384,10 @@ def cmd_activate(profile_name: str, config: Config) -> None:
     for repo, path in worktree_paths.items():
         print(f"    {path.relative_to(_pkg.ROOT_DIR)}")
     ws_rel = vscode_ws.relative_to(_pkg.ROOT_DIR)
-    dir_rel = env_dir.relative_to(_pkg.ROOT_DIR)
+    zed_rel = zed_dir.relative_to(_pkg.ROOT_DIR)
     print("  IDE workspaces:")
     print(f"    VS Code:   code {hyperlink(str(ws_rel), 'file://' + str(vscode_ws))}")
-    print(f"    Zed:       zed  {dir_rel}")
-    print(f"    JetBrains: pycharm {dir_rel}")
+    print(f"    Zed:       zed  {zed_rel}")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print()
     print("Useful commands (inside the activated shell):")
@@ -464,7 +462,7 @@ Examples:
     sp_remove.add_argument("--force", action="store_true", help="Remove even if worktrees are dirty")
 
     sp_gen = subparsers.add_parser("gen", help="Regenerate IDE workspace files without activating")
-    sp_gen.add_argument("ide", choices=["vscode", "zed", "jetbrains", "all"],
+    sp_gen.add_argument("ide", choices=["vscode", "zed", "all"],
                         help="IDE target")
     sp_gen.add_argument("profile_name", nargs="?", help="Profile name (defaults to current)")
 
