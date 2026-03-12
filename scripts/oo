@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
+"""oo — Odoo development environment manager.
+
+Usage:
+    oo <profile>                      Activate a profile (set up worktrees + shell)
+    oo community=master ...           Ad-hoc profile (no TOML declaration needed)
+    oo ls                             List profiles from odoo-env.toml
+    oo status [profile]               Git status (current profile, or all)
+    oo rebase [profile]               Fetch + rebase onto upstream (or declared base)
+    oo gen <ide> [profile]            Regenerate IDE workspace (vscode/zed/jetbrains/all)
+    oo rm <profile> [--force]         Remove worktrees for a profile
+
+Profiles are declared in odoo-env.toml at the repo root.
+Copy odoo-env.toml.example to odoo-env.toml and customize.
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from oo.cli import main
+
+main()

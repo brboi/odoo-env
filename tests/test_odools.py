@@ -1,5 +1,20 @@
 """Tests for generate_odools_config."""
 from pathlib import Path
+from oo.config import Config, Profile, BranchSpec
+
+
+def _make_config(*profile_specs: tuple[str, dict[str, str]]) -> Config:
+    """Helper: build a Config from (name, {repo: branch}) tuples."""
+    profiles = [
+        Profile(
+            name=name,
+            branch_specs={repo: BranchSpec.parse(b) for repo, b in branches.items()},
+            odoorc={},
+            options={},
+        )
+        for name, branches in profile_specs
+    ]
+    return Config(profiles=profiles, odoorc={}, remotes={}, options={})
 
 
 class TestGenerateOdoolsConfig:
@@ -83,12 +98,9 @@ class TestGenerateOdoolsConfig:
 
 
 class TestGenerateOdoolsConfigMultiEnv:
-    def _toml_data(self, envs: dict[str, str]) -> dict:
-        """Build minimal toml_data with {env_name: community_branch} mapping."""
-        data: dict = {}
-        for env_name, community_branch in envs.items():
-            data[env_name] = {"branches": {"community": community_branch}}
-        return data
+    def _make_config(self, envs: dict[str, str]) -> Config:
+        """Build a Config from {env_name: community_branch} mapping."""
+        return _make_config(*((name, {"community": branch}) for name, branch in envs.items()))
 
     def test_active_env_appears_first(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
@@ -98,9 +110,9 @@ class TestGenerateOdoolsConfigMultiEnv:
         community_active.mkdir(parents=True)
         community_other.mkdir(parents=True)
 
-        toml_data = self._toml_data({"prod": "18.0", "dev": "master"})
+        config = self._make_config({"prod": "18.0", "dev": "master"})
         mod.generate_odools_config(
-            "prod", {"community": community_active}, "/py", toml_data
+            "prod", {"community": community_active}, "/py", config
         )
 
         content = (tmp_path / "odools.toml").read_text()
@@ -114,9 +126,9 @@ class TestGenerateOdoolsConfigMultiEnv:
         community_active.mkdir(parents=True)
         community_other.mkdir(parents=True)
 
-        toml_data = self._toml_data({"prod": "18.0", "dev": "master"})
+        config = self._make_config({"prod": "18.0", "dev": "master"})
         mod.generate_odools_config(
-            "prod", {"community": community_active}, "/py", toml_data
+            "prod", {"community": community_active}, "/py", config
         )
 
         content = (tmp_path / "odools.toml").read_text()
@@ -130,16 +142,16 @@ class TestGenerateOdoolsConfigMultiEnv:
         community_active.mkdir(parents=True)
         # community/master intentionally NOT created
 
-        toml_data = self._toml_data({"prod": "18.0", "dev": "master"})
+        config = self._make_config({"prod": "18.0", "dev": "master"})
         mod.generate_odools_config(
-            "prod", {"community": community_active}, "/py", toml_data
+            "prod", {"community": community_active}, "/py", config
         )
 
         content = (tmp_path / "odools.toml").read_text()
         assert content.count("[[config]]") == 1
         assert 'name = "Odoo Dev — dev"' not in content
 
-    def test_no_toml_data_produces_single_section(self, mod, tmp_path, monkeypatch):
+    def test_no_config_produces_single_section(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
         community = tmp_path / "src" / "community" / "18.0"
         community.mkdir(parents=True)
@@ -157,9 +169,9 @@ class TestGenerateOdoolsConfigMultiEnv:
         community_active.mkdir(parents=True)
         community_other.mkdir(parents=True)
 
-        toml_data = self._toml_data({"prod": "18.0", "dev": "master"})
+        config = self._make_config({"prod": "18.0", "dev": "master"})
         mod.generate_odools_config(
-            "prod", {"community": community_active}, "/py", toml_data
+            "prod", {"community": community_active}, "/py", config
         )
 
         content = (tmp_path / "odools.toml").read_text()
