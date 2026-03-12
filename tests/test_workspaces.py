@@ -1,4 +1,4 @@
-"""Tests for IDE workspace generation: VS Code, Zed, JetBrains."""
+"""Tests for IDE workspace generation: VS Code, Zed."""
 import json
 from pathlib import Path
 
@@ -19,7 +19,7 @@ class TestGenerateVscodeWorkspace:
 
         out = self._call(mod, tmp_path, {"community": community})
 
-        assert out == tmp_path / ".cache" / "envs" / "master" / "master.code-workspace"
+        assert out == tmp_path / "workspaces" / "master" / "vscode" / "master.code-workspace"
         assert out.exists()
 
     def test_json_structure(self, mod, tmp_path, monkeypatch):
@@ -135,6 +135,8 @@ class TestGenerateZedWorkspace:
                 "ODOO_RC": "/tmp/odoorc",
                 "PYTHONPATH": str(community),
                 "ODOO_PATH": str(community),
+                "COMMUNITY": str(community),
+                "PATH": "/usr/bin:/bin",
             },
         )
 
@@ -145,7 +147,7 @@ class TestGenerateZedWorkspace:
 
         self._call(mod, tmp_path, {"community": community})
 
-        settings_path = tmp_path / ".cache" / "envs" / "master" / ".zed" / "settings.json"
+        settings_path = tmp_path / "workspaces" / "master" / "zed" / ".zed" / "settings.json"
         assert settings_path.exists()
 
     def test_settings_content(self, mod, tmp_path, monkeypatch):
@@ -155,7 +157,7 @@ class TestGenerateZedWorkspace:
 
         self._call(mod, tmp_path, {"community": community})
 
-        settings_path = tmp_path / ".cache" / "envs" / "master" / ".zed" / "settings.json"
+        settings_path = tmp_path / "workspaces" / "master" / "zed" / ".zed" / "settings.json"
         data = json.loads(settings_path.read_text())
         assert "lsp" in data
         assert "terminal" in data
@@ -170,9 +172,9 @@ class TestGenerateZedWorkspace:
 
         self._call(mod, tmp_path, {"community": community, "enterprise": enterprise})
 
-        env_dir = tmp_path / ".cache" / "envs" / "master"
-        community_link = env_dir / "community"
-        enterprise_link = env_dir / "enterprise"
+        zed_dir = tmp_path / "workspaces" / "master" / "zed"
+        community_link = zed_dir / "community"
+        enterprise_link = zed_dir / "enterprise"
         assert community_link.is_symlink()
         assert enterprise_link.is_symlink()
         assert community_link.resolve() == community.resolve()
@@ -185,10 +187,33 @@ class TestGenerateZedWorkspace:
 
         self._call(mod, tmp_path, {"community": community})
 
-        link = tmp_path / ".cache" / "envs" / "master" / "community"
+        link = tmp_path / "workspaces" / "master" / "zed" / "community"
         assert link.is_symlink()
         # readlink should be a relative path, not absolute
         assert not Path(link.readlink()).is_absolute()
+
+    def test_symlink_odoo_env(self, mod, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
+        community = tmp_path / "src" / "community" / "master"
+        community.mkdir(parents=True)
+
+        self._call(mod, tmp_path, {"community": community})
+
+        link = tmp_path / "workspaces" / "master" / "zed" / "odoo-env"
+        assert link.is_symlink()
+        assert link.resolve() == tmp_path.resolve()
+
+    def test_symlink_odoorc(self, mod, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
+        community = tmp_path / "src" / "community" / "master"
+        community.mkdir(parents=True)
+
+        self._call(mod, tmp_path, {"community": community})
+
+        link = tmp_path / "workspaces" / "master" / "zed" / "odoorc"
+        assert link.is_symlink()
+        # Should be a relative symlink pointing to ../odoorc
+        assert Path(link.readlink()) == Path("../odoorc")
 
     def test_file_scan_exclusions(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
@@ -197,7 +222,7 @@ class TestGenerateZedWorkspace:
 
         self._call(mod, tmp_path, {"community": community})
 
-        settings_path = tmp_path / ".cache" / "envs" / "master" / ".zed" / "settings.json"
+        settings_path = tmp_path / "workspaces" / "master" / "zed" / ".zed" / "settings.json"
         data = json.loads(settings_path.read_text())
         assert "file_scan_exclusions" in data
         assert "**/__pycache__" in data["file_scan_exclusions"]
@@ -210,94 +235,86 @@ class TestGenerateZedWorkspace:
 
         self._call(mod, tmp_path, {"community": community})
 
-        settings_path = tmp_path / ".cache" / "envs" / "master" / ".zed" / "settings.json"
+        settings_path = tmp_path / "workspaces" / "master" / "zed" / ".zed" / "settings.json"
         data = json.loads(settings_path.read_text())
         venv_python = data["lsp"]["basedpyright"]["settings"]["python.pythonPath"]
         assert ".venv" in venv_python
 
-
-class TestGenerateIdeaProject:
-    def _call(self, mod, tmp_path, worktree_paths, name="master", env=None):
-        return mod.generate_idea_project(name, worktree_paths, env or {})
-
-    def test_generates_modules_xml(self, mod, tmp_path, monkeypatch):
+    def test_terminal_env_virtual_env(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
         community = tmp_path / "src" / "community" / "master"
         community.mkdir(parents=True)
 
         self._call(mod, tmp_path, {"community": community})
 
-        modules_xml = tmp_path / ".cache" / "envs" / "master" / ".idea" / "modules.xml"
-        assert modules_xml.exists()
+        settings_path = tmp_path / "workspaces" / "master" / "zed" / ".zed" / "settings.json"
+        data = json.loads(settings_path.read_text())
+        assert "VIRTUAL_ENV" in data["terminal"]["env"]
+        assert ".venv" in data["terminal"]["env"]["VIRTUAL_ENV"]
 
-    def test_generates_iml_file(self, mod, tmp_path, monkeypatch):
+    def test_terminal_env_path_includes_venv(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
         community = tmp_path / "src" / "community" / "master"
         community.mkdir(parents=True)
 
         self._call(mod, tmp_path, {"community": community})
 
-        iml = tmp_path / ".cache" / "envs" / "master" / ".idea" / "odoo-master.iml"
-        assert iml.exists()
+        settings_path = tmp_path / "workspaces" / "master" / "zed" / ".zed" / "settings.json"
+        data = json.loads(settings_path.read_text())
+        path_val = data["terminal"]["env"]["PATH"]
+        assert ".venv/bin" in path_val
 
-    def test_generates_misc_xml(self, mod, tmp_path, monkeypatch):
+    def test_odools_lsp_configured(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
         community = tmp_path / "src" / "community" / "master"
         community.mkdir(parents=True)
 
         self._call(mod, tmp_path, {"community": community})
 
-        misc_xml = tmp_path / ".cache" / "envs" / "master" / ".idea" / "misc.xml"
-        assert misc_xml.exists()
-        content = misc_xml.read_text()
-        assert "ProjectRootManager" in content
-        assert "Python SDK" in content
+        settings_path = tmp_path / "workspaces" / "master" / "zed" / ".zed" / "settings.json"
+        data = json.loads(settings_path.read_text())
+        assert "odoo-ls" in data["lsp"]
+        assert "binary" in data["lsp"]["odoo-ls"]
 
-    def test_project_name_file(self, mod, tmp_path, monkeypatch):
+    def test_odools_selected_profile(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
         community = tmp_path / "src" / "community" / "master"
         community.mkdir(parents=True)
 
         self._call(mod, tmp_path, {"community": community}, name="my-env")
 
-        name_file = tmp_path / ".cache" / "envs" / "my-env" / ".idea" / ".name"
-        assert name_file.exists()
-        assert name_file.read_text() == "odoo-my-env"
+        settings_path = tmp_path / "workspaces" / "my-env" / "zed" / ".zed" / "settings.json"
+        data = json.loads(settings_path.read_text())
+        selected = data["lsp"]["odoo-ls"]["settings"]["Odoo.selectedProfile"]
+        assert selected == "Odoo Dev \u2014 my-env"
 
-    def test_iml_contains_content_roots(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
-        community = tmp_path / "src" / "community" / "master"
-        enterprise = tmp_path / "src" / "enterprise" / "master"
-        community.mkdir(parents=True)
-        enterprise.mkdir(parents=True)
-
-        self._call(mod, tmp_path, {"community": community, "enterprise": enterprise})
-
-        iml = tmp_path / ".cache" / "envs" / "master" / ".idea" / "odoo-master.iml"
-        content = iml.read_text()
-        assert str(community) in content
-        assert str(enterprise) in content
-
-    def test_modules_xml_references_iml(self, mod, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
-        community = tmp_path / "src" / "community" / "master"
-        community.mkdir(parents=True)
-
-        self._call(mod, tmp_path, {"community": community}, name="my-env")
-
-        modules_xml = tmp_path / ".cache" / "envs" / "my-env" / ".idea" / "modules.xml"
-        content = modules_xml.read_text()
-        assert "odoo-my-env.iml" in content
-
-    def test_iml_exclude_folders(self, mod, tmp_path, monkeypatch):
+    def test_generates_tasks_json(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
         community = tmp_path / "src" / "community" / "master"
         community.mkdir(parents=True)
 
         self._call(mod, tmp_path, {"community": community})
 
-        iml = tmp_path / ".cache" / "envs" / "master" / ".idea" / "odoo-master.iml"
-        content = iml.read_text()
-        assert "node_modules" in content
-        assert "__pycache__" in content
-        assert "excludeFolder" in content
+        tasks_path = tmp_path / "workspaces" / "master" / "zed" / ".zed" / "tasks.json"
+        assert tasks_path.exists()
+        tasks = json.loads(tasks_path.read_text())
+        labels = [t["label"] for t in tasks]
+        assert "Start Odoo" in labels
+        assert "Start Debug Shell" in labels
+        assert "Run Console Tests" in labels
+
+    def test_generates_launch_json(self, mod, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
+        community = tmp_path / "src" / "community" / "master"
+        community.mkdir(parents=True)
+
+        self._call(mod, tmp_path, {"community": community})
+
+        launch_path = tmp_path / "workspaces" / "master" / "zed" / ".zed" / "launch.json"
+        assert launch_path.exists()
+        data = json.loads(launch_path.read_text())
+        assert "configurations" in data
+        names = [c["name"] for c in data["configurations"]]
+        assert "Debug Odoo" in names
+        assert "Debug Shell" in names
+        assert all(c["type"] == "debugpy" for c in data["configurations"])

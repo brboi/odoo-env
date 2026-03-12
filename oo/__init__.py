@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CACHE_DIR = ROOT_DIR / ".cache" / "git"
 SRC_DIR = ROOT_DIR / "src"
+WORKSPACES_DIR = ROOT_DIR / "workspaces"
 
 # Re-export public API for test access via `import oo as mod`
 from oo.ui import hyperlink, log_info, log_ok, log_warn, log_error, RED, GREEN, YELLOW, BLUE, NC  # noqa: E402, F401
@@ -23,7 +24,7 @@ from oo.git import (  # noqa: E402, F401
 )
 from oo.workspace import (  # noqa: E402, F401
     discover_addons_paths, build_paths, profile_worktree_paths,
-    generate_vscode_workspace, generate_zed_workspace, generate_idea_project,
+    generate_vscode_workspace, generate_zed_workspace,
     generate_odools_config,
 )
 from oo.shell import build_odoo_conf  # noqa: E402, F401

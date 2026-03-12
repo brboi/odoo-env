@@ -16,8 +16,8 @@ def build_odoo_conf(
     defaults: dict,
     odoorc_overrides: dict,
 ) -> Path:
-    """Write .cache/envs/<name>/odoorc from merged defaults + overrides."""
-    out = root_dir / ".cache" / "envs" / name / "odoorc"
+    """Write workspaces/<name>/odoorc from merged defaults + overrides."""
+    out = root_dir / "workspaces" / name / "odoorc"
 
     cfg = configparser.ConfigParser()
     cfg.add_section("options")
