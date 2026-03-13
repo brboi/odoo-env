@@ -1,0 +1,15 @@
+[options]
+admin_passwd = Password
+data_dir = /home/boi/dev/brboi/odoo-env/.cache/odoo-data
+db_host = localhost
+db_port = 5432
+db_user = odoo
+db_password = odoo
+db_template = template0
+smtp_server = mailpit
+smtp_port = 1025
+addons_path = /home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm/iap_common,/home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm/iap_extract,/home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm/iap_odoo,/home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm/iap_services,/home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm/iap_website_scraper,/home/boi/dev/brboi/odoo-env/src/enterprise/18.0,/home/boi/dev/brboi/odoo-env/src/community/18.0/addons,/home/boi/dev/brboi/odoo-env/src/community/18.0/odoo/addons
+http_port = 8068
+db_name = buy-number-iap
+dbfilter = ^buy-number-iap$
+

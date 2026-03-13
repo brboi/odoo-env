@@ -1,0 +1,45 @@
+[
+  {
+    "label": "Start Odoo",
+    "command": "python",
+    "args": [
+      "/home/boi/dev/brboi/odoo-env/src/community/master-parrot/odoo-bin",
+      "--config=/home/boi/dev/brboi/odoo-env/workspaces/buy-number/odoorc",
+      "--dev=all"
+    ],
+    "cwd": "/home/boi/dev/brboi/odoo-env/src/community/master-parrot",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "Start Debug Shell",
+    "command": "python",
+    "args": [
+      "/home/boi/dev/brboi/odoo-env/src/community/master-parrot/odoo-bin",
+      "shell",
+      "--config=/home/boi/dev/brboi/odoo-env/workspaces/buy-number/odoorc",
+      "--dev=all"
+    ],
+    "cwd": "/home/boi/dev/brboi/odoo-env/src/community/master-parrot",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "Run Console Tests",
+    "command": "python",
+    "args": [
+      "/home/boi/dev/brboi/odoo-env/src/community/master-parrot/odoo-bin",
+      "--config=/home/boi/dev/brboi/odoo-env/workspaces/buy-number/odoorc",
+      "--dev=all",
+      "--test-enable",
+      "--test-tags=",
+      "--stop-after-init"
+    ],
+    "cwd": "/home/boi/dev/brboi/odoo-env/src/community/master-parrot",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  }
+]

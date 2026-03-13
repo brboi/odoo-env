@@ -1,0 +1,44 @@
+{
+  "tab_size": 4,
+  "lsp": {
+    "basedpyright": {
+      "settings": {
+        "python.pythonPath": "/home/boi/dev/brboi/odoo-env/.venv/bin/python3",
+        "python.venvPath": "/home/boi/dev/brboi/odoo-env",
+        "python.venv": ".venv"
+      }
+    },
+    "odoo-ls": {
+      "binary": {
+        "path": "/home/boi/dev/brboi/odoo-env/.venv/bin/odoo-ls",
+        "arguments": []
+      },
+      "settings": {
+        "Odoo.selectedProfile": "Odoo Dev \u2014 buy-number-iap"
+      }
+    }
+  },
+  "terminal": {
+    "env": {
+      "ODOO_ENV_NAME": "buy-number-iap",
+      "ODOO_VERSION": "18.0",
+      "ODOO_RC": "/home/boi/dev/brboi/odoo-env/workspaces/buy-number-iap/odoorc",
+      "PYTHONPATH": "/home/boi/dev/brboi/odoo-env/src/community/18.0",
+      "ODOO_ADDONS_PATH": "/home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm/iap_common,/home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm/iap_extract,/home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm/iap_odoo,/home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm/iap_services,/home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm/iap_website_scraper,/home/boi/dev/brboi/odoo-env/src/enterprise/18.0,/home/boi/dev/brboi/odoo-env/src/community/18.0/addons,/home/boi/dev/brboi/odoo-env/src/community/18.0/odoo/addons",
+      "ODOO_PORT": "8068",
+      "ODOO_PATH": "/home/boi/dev/brboi/odoo-env/src/community/18.0",
+      "ODOO_ENTERPRISE_PATH": "/home/boi/dev/brboi/odoo-env/src/enterprise/18.0",
+      "ODOO_EXTRA_PATHS": "/home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm",
+      "COMMUNITY": "/home/boi/dev/brboi/odoo-env/src/community/18.0",
+      "ENTERPRISE": "/home/boi/dev/brboi/odoo-env/src/enterprise/18.0",
+      "PATH": "/home/boi/dev/brboi/odoo-env/.venv/bin:/home/boi/dev/brboi/odoo-env/src/community/18.0:/home/boi/dev/brboi/odoo-env/.venv/bin:/home/boi/dev/brboi/odoo-env/scripts:/home/boi/.local/share/mise/installs/python/3.12.13/bin:/home/boi/.local/share/mise/installs/node/25.8.0/bin:/home/boi/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/opt/android-sdk/emulator:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/tools:/opt/android-sdk/tools/bin:/usr/lib/jvm/default/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl:/home/boi/dev/brboi/odoo-env/src/community/master-parrot",
+      "IAP_APPS": "/home/boi/dev/brboi/odoo-env/src/iap-apps/18.0-add-voip-telnyx-service-basm",
+      "VIRTUAL_ENV": "/home/boi/dev/brboi/odoo-env/.venv"
+    }
+  },
+  "file_scan_exclusions": [
+    "**/__pycache__",
+    "**/node_modules",
+    "**/*.pyc"
+  ]
+}

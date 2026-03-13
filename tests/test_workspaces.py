@@ -19,7 +19,7 @@ class TestGenerateVscodeWorkspace:
 
         out = self._call(mod, tmp_path, {"community": community})
 
-        assert out == tmp_path / "workspaces" / "master" / "vscode" / "master.code-workspace"
+        assert out == tmp_path / "workspaces" / "master" / "master.code-workspace"
         assert out.exists()
 
     def test_json_structure(self, mod, tmp_path, monkeypatch):
@@ -203,17 +203,19 @@ class TestGenerateZedWorkspace:
         assert link.is_symlink()
         assert link.resolve() == tmp_path.resolve()
 
-    def test_symlink_odoorc(self, mod, tmp_path, monkeypatch):
+    def test_symlink_odools_toml(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)
         community = tmp_path / "src" / "community" / "master"
         community.mkdir(parents=True)
+        (tmp_path / "odools.toml").write_text("# dummy")
 
         self._call(mod, tmp_path, {"community": community})
 
-        link = tmp_path / "workspaces" / "master" / "zed" / "odoorc"
+        zed_dir = tmp_path / "workspaces" / "master" / "zed"
+        link = zed_dir / "odools.toml"
         assert link.is_symlink()
-        # Should be a relative symlink pointing to ../odoorc
-        assert Path(link.readlink()) == Path("../odoorc")
+        assert link.resolve() == (tmp_path / "odools.toml").resolve()
+        assert not Path(link.readlink()).is_absolute()
 
     def test_file_scan_exclusions(self, mod, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ROOT_DIR", tmp_path)

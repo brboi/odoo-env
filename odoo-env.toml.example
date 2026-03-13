@@ -2,20 +2,20 @@
 #
 #   cp odoo-env.toml.example odoo-env.toml
 #
-# [_.odoorc]        global Odoo conf defaults applied to all environments
-# [_.branches]      global branch defaults merged into every environment
-# [_.repos]         global custom repo URLs (alias → git URL)
-# [env.branches]    repo → branch mapping (community is required; env-specific wins over defaults)
-# [env.odoorc]      per-env Odoo conf overrides — optional
-# [env.repos]       custom repo URLs for non-odoo repos (alias → git URL)
-#
-# db_name defaults to the environment name — no need to set it explicitly.
+# [odoorc]          global Odoo conf defaults
+# [options]         global options (skip_js_tooling, etc.)
+# [remote.X]        custom repo URLs: [remote.my-addons] origin = "git@..."
+# [[profile]]       one section per environment
+#   name = "..."
+#   branch.community = "..."   repo → branch (community required)
+#   branch.enterprise = "..."
+#   odoorc.port = 8070         per-profile Odoo conf overrides (dotted keys)
+#   options.skip_js_tooling = ["repo"]
 
-[_.odoorc]
+[odoorc]
 port = 8069
 admin_passwd = "Password"
 server_wide_modules = "base,web"
-# data_dir = "/var/odoo-data"
 db_host = "postgres"
 db_port = 5432
 db_user = "odoo"
@@ -24,53 +24,42 @@ db_template = "template0"
 smtp_server = "mailpit"
 smtp_port = 1025
 
-[master.branches]
-community = "master"
-enterprise = "master"
+[[profile]]
+name = "master"
+branch.community = "master"
+branch.enterprise = "master"
 
-[my-main.branches]
-community = "master"
-enterprise = "master-fix"
+[[profile]]
+name = "my-main"
+branch.community = "master"
+branch.enterprise = "master-fix"
+odoorc.port = 8070
 
-[my-main.odoorc]
-port = 8070
+[[profile]]
+name = "my-other"
+branch.community = "18.0"
+branch.enterprise = "18.0-fix"
 
-[my-other.branches]
-community = "18.0"
-enterprise = "18.0-fix"
+# Custom db_name:
+# odoorc.db_name = "mydb"
 
-# Custom db_name (overrides the auto-derived env name):
-# [my-other.odoorc]
-# db_name = "mydb"
-
-# Custom (non-odoo) repos: declare URL here, reference branch in [env.branches]
-# [my-client.branches]
-# community = "17.0"
-# enterprise = "17.0"
-# my-addons = "main"
+# Custom (non-odoo) repos:
+# [remote.my-addons]
+# origin = "git@github.com:myclient/odoo-addons.git"
 #
-# [my-client.repos]
-# my-addons = "git@github.com:myclient/odoo-addons.git"
+# [[profile]]
+# name = "my-client"
+# branch.community = "17.0"
+# branch.enterprise = "17.0"
+# branch.my-addons = "main"
 
-# Global custom repos available in all environments:
-# [_.repos]
-# utils = "git@github.com:mycompany/odoo-utils.git"
-# [_.branches]
-# utils = "main"
-
-# Skip JS tooling (jsconfig.json, package.json, node_modules symlink) for specific repos.
-# Useful when the repo doesn't gitignore these files and you can't modify it.
-# Per-env or global defaults:
-# [my-client.options]
-# skip_js_tooling = ["my-custom-repo"]
+# Skip JS tooling per-profile or globally:
+# options.skip_js_tooling = ["my-addons"]
 #
-# [_.options]
-# skip_js_tooling = ["my-custom-repo"]  # applied to all envs; merged with per-env list
+# [options]
+# skip_js_tooling = ["my-addons"]
 
-# PR branch formats — three equivalent ways to reference a GitHub PR:
-#
-# [my-pr.branches]
-# community = "18.0"
-# enterprise = "pr/1261"                                  # origin PR (worktree: pr-1261)
-# enterprise = "odoo-dev/enterprise#1261"                 # fork PR shorthand (worktree: odoo-dev-pr-1261)
-# enterprise = "https://github.com/odoo-dev/enterprise/pull/1261"  # full URL (same)
+# PR branch formats:
+# branch.enterprise = "pr/1261"
+# branch.enterprise = "odoo-dev/enterprise#1261"
+# branch.enterprise = "https://github.com/odoo-dev/enterprise/pull/1261"

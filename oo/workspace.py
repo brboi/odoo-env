@@ -127,7 +127,7 @@ def generate_vscode_workspace(
 ) -> Path:
     """Generate a VS Code .code-workspace file for the environment."""
     from oo.ui import log_ok
-    env_dir = _pkg.ROOT_DIR / "workspaces" / name / "vscode"
+    env_dir = _pkg.ROOT_DIR / "workspaces" / name
     out = env_dir / f"{name}.code-workspace"
 
     folders = []
@@ -239,11 +239,11 @@ def generate_zed_workspace(
         odoo_env_link.unlink()
     odoo_env_link.symlink_to(os.path.relpath(_pkg.ROOT_DIR, env_dir))
 
-    # Symlink: odoorc → ../odoorc (shared odoo config)
-    odoorc_link = env_dir / "odoorc"
-    if odoorc_link.exists() or odoorc_link.is_symlink():
-        odoorc_link.unlink()
-    odoorc_link.symlink_to("../odoorc")
+    # Symlink: odools.toml → ROOT_DIR/odools.toml
+    odools_link = env_dir / "odools.toml"
+    if odools_link.exists() or odools_link.is_symlink():
+        odools_link.unlink()
+    odools_link.symlink_to(os.path.relpath(_pkg.ROOT_DIR / "odools.toml", env_dir))
 
     venv_dir = str(_pkg.ROOT_DIR / ".venv")
     venv_python = str(_pkg.ROOT_DIR / ".venv" / "bin" / "python3")

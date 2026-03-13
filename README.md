@@ -27,7 +27,7 @@ mise activate fish | source
 
 Once active, entering this repo automatically:
 - Activates the Python venv (`.venv/`)
-- Adds `scripts/` to `$PATH` (so `odoo-env` works directly)
+- Adds `scripts/` to `$PATH` (so `oo` works directly)
 
 ### Mise Setup
 
@@ -45,7 +45,7 @@ mise run bootstrap
 # System build deps (for pip-based installs, non-Debian/Ubuntu)
 xargs sudo apt install -y < apt-system-deps.txt
 
-# On Debian/Ubuntu, prefer debinstall.sh (suggested by odoo-env after setup)
+# On Debian/Ubuntu, prefer debinstall.sh (suggested by oo after setup)
 
 # RTL CSS support
 npm install -g rtlcss
@@ -73,28 +73,29 @@ Copy `odoo-env.toml.example` to get started and edit it to define your environme
 
 | Command | Description |
 |---------|-------------|
-| `odoo-env list` | List all environments from odoo-env.toml |
-| `odoo-env activate <env>` | Set up worktrees and launch a shell |
-| `odoo-env <env>` | Shorthand for `activate` |
-| `odoo-env status` | Git status of worktrees (current env, or all) |
-| `odoo-env rebase` | Fetch + rebase worktrees onto upstream (current env, or all) |
-| `odoo-env remove <env>` | Remove worktrees for an environment |
+| `oo list` | List all profiles from odoo-env.toml |
+| `oo activate <profile>` | Set up worktrees and launch a shell |
+| `oo <profile>` | Shorthand for `activate` |
+| `oo status` | Git status of worktrees (current profile, or all) |
+| `oo rebase` | Fetch + rebase worktrees onto upstream (current profile, or all) |
+| `oo remove <profile>` | Remove worktrees for a profile |
+| `oo gen [--ide vscode\|zed\|all] <profile>` | Regenerate IDE workspace files |
 
-`status` and `rebase` use the current active environment (detected via `$ODOO_ENV_NAME`)
-when run inside an active shell, and operate on all environments otherwise.
+`status` and `rebase` use the current active profile (detected via `$ODOO_ENV_NAME`)
+when run inside an active shell, and operate on all profiles otherwise.
 
 ### Tab completion
 
-Tab completion for subcommands and environment names (optional, requires `argcomplete`):
+Tab completion for subcommands and profile names (optional, requires `argcomplete`):
 
 ```bash
 pip install argcomplete
 
 # Bash/Zsh — add to ~/.bashrc or ~/.zshrc:
-eval "$(register-python-argcomplete odoo-env)"
+eval "$(register-python-argcomplete oo)"
 
 # Fish — run once:
-register-python-argcomplete --shell fish odoo-env > ~/.config/fish/completions/odoo-env.fish
+register-python-argcomplete --shell fish oo > ~/.config/fish/completions/oo.fish
 ```
 
 ## Git workflow with worktrees
@@ -119,7 +120,7 @@ git push -u dev HEAD
 ### Rebase on updated master
 
 ```bash
-cd src/community/master-fix  # or launch via odoo-env
+cd src/community/master-fix  # or launch via oo
 git fetch -p
 git rebase origin/master             # detached HEAD — use origin/master, not master
 git push --force-with-lease
@@ -135,27 +136,27 @@ git rebase -i @~3 --autosquash
 ### Clean up after merge
 
 ```bash
-odoo-env remove my-project
+oo remove my-project
 ```
 
 This removes worktrees and deletes local feature branches automatically (unless another
-environment in `odoo-env.toml` uses the same branch).
+profile in `odoo-env.toml` uses the same branch).
 
 > `src/enterprise/` follows the same pattern.
 
 ## IDE Workspaces
 
-Running `odoo-env activate <env>` automatically generates workspace configuration files for
-VS Code, Zed, and JetBrains (PyCharm/IntelliJ) in `.cache/envs/<env>/`.
-Configs are regenerated on every `activate` run.
+Running `oo activate <profile>` automatically generates workspace configuration files for
+VS Code and Zed in `workspaces/<profile>/`.
+Configs are regenerated on every `activate` run. `workspaces/` is gitignored.
 
 ### VS Code
 
-A `.code-workspace` file is generated at `.cache/envs/<env>/<env>.code-workspace`.
+A `.code-workspace` file is generated at `workspaces/<profile>/<profile>.code-workspace`.
 Open it directly from the terminal link shown after activation, or run:
 
 ```bash
-code .cache/envs/<env>/<env>.code-workspace
+code workspaces/<profile>/<profile>.code-workspace
 ```
 
 The workspace configures:
@@ -164,7 +165,7 @@ The workspace configures:
 - **Python interpreter** pointing to `.venv/bin/python3`
 - **Ctrl+P (Quick Open)** finds files across all worktrees (`search.useIgnoreFiles: false`)
 - **Heavy directories excluded** from indexing: `__pycache__`, `*.pyc`, `node_modules`
-- **Odoo LSP** profile pre-selected (`Odoo.selectedConfiguration`)
+- **Odoo LSP** profile pre-selected (`Odoo.selectedProfile`)
 - **Debug launch config** to start Odoo with debugpy using the generated `odoorc`
 - **Integrated terminal** pre-loaded with `$ODOO_RC`, `$PYTHONPATH`, `$ODOO_PATH`, etc.
 
@@ -181,26 +182,17 @@ cp .vscode/settings.json.example .vscode/settings.json
 Open the environment directory in Zed:
 
 ```bash
-zed .cache/envs/<env>/
+zed workspaces/<profile>/zed/
 ```
 
 Zed workspace includes:
 
-- **Symlinks** to each worktree inside `.cache/envs/<env>/` (so Zed sees them as project roots)
-- **`.zed/settings.json`** with Pyright LSP config, terminal env vars, and file scan exclusions
-
-### JetBrains (PyCharm / IntelliJ)
-
-Open the environment directory in PyCharm:
-
-```bash
-pycharm .cache/envs/<env>/
-```
-
-A minimal `.idea/` project is generated with:
-
-- **Content roots** for each worktree with `node_modules` and `__pycache__` excluded
-- **Python SDK** configured to `Python 3.12 (odoo-env)` (set up the SDK once in PyCharm settings)
+- **Symlinks** to each worktree inside `workspaces/<profile>/zed/` (so Zed sees them as project roots)
+- **`odoo-env` symlink** pointing to the repo root (access to scripts, configs, etc.)
+- **`odools.toml` symlink** pointing to `odools.toml` at the repo root
+- **`.zed/settings.json`** with Pyright and Odoo LSP config, terminal env vars, and file scan exclusions
+- **`.zed/tasks.json`** with Start Odoo, Debug Shell, and Run Tests tasks
+- **`.zed/launch.json`** with debugpy launch configurations
 
 ## Dev services (optional)
 
@@ -219,14 +211,14 @@ mise run services-down  # stop all
 | pgweb | `localhost:8081` | Browser-based DB client |
 
 If you have your own Postgres, skip `mise run services` and set DB connection
-settings in `odoo-env.toml` under `[env.odoorc]` or globally under `[_.odoorc]`.
+settings in `odoo-env.toml` under `[odoorc]` globally or `odoorc.X` per profile.
 
 ## Odoo configuration
 
-`odoo-env.toml` (gitignored) declares environments and Odoo conf settings.
-`[_.odoorc]` holds global defaults; `[env.odoorc]` holds per-environment overrides.
-`odoo-env` merges these and sets `ODOO_RC` automatically — no need to pass
-`--config` manually.
+`odoo-env.toml` (gitignored) declares profiles and Odoo conf settings.
+`[odoorc]` holds global defaults; `odoorc.X = ...` inside a `[[profile]]` holds
+per-profile overrides. `oo` merges these and sets `ODOO_RC` automatically — no need
+to pass `--config` manually.
 
 ## Structure
 
@@ -234,18 +226,24 @@ settings in `odoo-env.toml` under `[env.odoorc]` or globally under `[_.odoorc]`.
 odoo-env/
 ├── .cache/               # Gitignored runtime data
 │   ├── git/              # Bare repositories
-│   ├── postgres-data/    # Postgres volume
-│   └── envs/{name}/               # Generated per-environment files
-│       ├── odoorc                 # Merged Odoo config
-│       ├── {name}.code-workspace  # VS Code workspace
-│       ├── .zed/settings.json     # Zed project settings
-│       └── .idea/                 # JetBrains project
+│   └── postgres-data/    # Postgres volume
+├── workspaces/{name}/    # Gitignored generated workspace files
+│   ├── odoorc                 # Merged Odoo config
+│   ├── {name}.code-workspace  # VS Code workspace
+│   └── zed/
+│       ├── .zed/settings.json, tasks.json, launch.json
+│       ├── community, enterprise, … → symlinks to src/
+│       ├── odoo-env → symlink to repo root
+│       └── odools.toml → symlink to repo root/odools.toml
 ├── src/                  # Worktrees (gitignored)
 │   ├── community/{branch}/
 │   └── enterprise/{branch}/
 ├── scripts/              # Auto-added to $PATH by mise
-│   ├── odoo-env
-│   └── install-wkhtmltopdf
+│   ├── oo
+│   ├── install-wkhtmltopdf
+│   ├── odoo-shell-aliases.sh
+│   └── odoo-shell-aliases.fish
+├── oo/                   # Python package
 ├── compose.yml
 ├── mise.toml
 ├── odoo-env.toml         # Gitignored — copy from .example

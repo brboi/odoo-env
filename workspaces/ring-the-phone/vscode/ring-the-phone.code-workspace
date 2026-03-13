@@ -1,0 +1,174 @@
+{
+  "folders": [
+    {
+      "name": "community",
+      "path": "../../../src/community/master-parrot"
+    },
+    {
+      "name": "enterprise",
+      "path": "../../../src/enterprise/master-parrot-ring-the-phone"
+    },
+    {
+      "name": "brboi",
+      "path": "../../../src/brboi/main"
+    },
+    {
+      "name": "odoo-env",
+      "path": "../../.."
+    }
+  ],
+  "settings": {
+    "python.defaultInterpreterPath": "/home/boi/dev/brboi/odoo-env/.venv/bin/python3",
+    "search.useIgnoreFiles": false,
+    "[python]": {
+      "editor.defaultFormatter": "charliermarsh.ruff"
+    },
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/*.pyc": true,
+      "**/node_modules": true
+    },
+    "search.exclude": {
+      "**/__pycache__": true,
+      "**/*.pyc": true,
+      "**/node_modules": true
+    },
+    "Odoo.selectedProfile": "Odoo Dev \u2014 ring-the-phone",
+    "terminal.integrated.env.linux": {
+      "ODOO_ENV_NAME": "ring-the-phone",
+      "ODOO_VERSION": "master",
+      "ODOO_RC": "/home/boi/dev/brboi/odoo-env/workspaces/ring-the-phone/odoorc",
+      "PYTHONPATH": "/home/boi/dev/brboi/odoo-env/src/community/master-parrot",
+      "ODOO_ADDONS_PATH": "/home/boi/dev/brboi/odoo-env/src/brboi/main,/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone,/home/boi/dev/brboi/odoo-env/src/community/master-parrot/addons,/home/boi/dev/brboi/odoo-env/src/community/master-parrot/odoo/addons",
+      "ODOO_PORT": "8070",
+      "ODOO_PATH": "/home/boi/dev/brboi/odoo-env/src/community/master-parrot",
+      "ODOO_ENTERPRISE_PATH": "/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone",
+      "ODOO_EXTRA_PATHS": "/home/boi/dev/brboi/odoo-env/src/brboi/main",
+      "COMMUNITY": "/home/boi/dev/brboi/odoo-env/src/community/master-parrot",
+      "ENTERPRISE": "/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone",
+      "PATH": "/home/boi/dev/brboi/odoo-env/src/community/master-parrot:/home/boi/dev/brboi/odoo-env/.venv/bin:/home/boi/dev/brboi/odoo-env/scripts:/home/boi/.local/share/mise/installs/python/3.12.13/bin:/home/boi/.local/share/mise/installs/node/25.8.0/bin:/home/boi/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/opt/android-sdk/emulator:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/tools:/opt/android-sdk/tools/bin:/usr/lib/jvm/default/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl",
+      "BRBOI": "/home/boi/dev/brboi/odoo-env/src/brboi/main"
+    },
+    "terminal.integrated.env.osx": {
+      "ODOO_ENV_NAME": "ring-the-phone",
+      "ODOO_VERSION": "master",
+      "ODOO_RC": "/home/boi/dev/brboi/odoo-env/workspaces/ring-the-phone/odoorc",
+      "PYTHONPATH": "/home/boi/dev/brboi/odoo-env/src/community/master-parrot",
+      "ODOO_ADDONS_PATH": "/home/boi/dev/brboi/odoo-env/src/brboi/main,/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone,/home/boi/dev/brboi/odoo-env/src/community/master-parrot/addons,/home/boi/dev/brboi/odoo-env/src/community/master-parrot/odoo/addons",
+      "ODOO_PORT": "8070",
+      "ODOO_PATH": "/home/boi/dev/brboi/odoo-env/src/community/master-parrot",
+      "ODOO_ENTERPRISE_PATH": "/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone",
+      "ODOO_EXTRA_PATHS": "/home/boi/dev/brboi/odoo-env/src/brboi/main",
+      "COMMUNITY": "/home/boi/dev/brboi/odoo-env/src/community/master-parrot",
+      "ENTERPRISE": "/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone",
+      "PATH": "/home/boi/dev/brboi/odoo-env/src/community/master-parrot:/home/boi/dev/brboi/odoo-env/.venv/bin:/home/boi/dev/brboi/odoo-env/scripts:/home/boi/.local/share/mise/installs/python/3.12.13/bin:/home/boi/.local/share/mise/installs/node/25.8.0/bin:/home/boi/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/opt/android-sdk/emulator:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/tools:/opt/android-sdk/tools/bin:/usr/lib/jvm/default/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl",
+      "BRBOI": "/home/boi/dev/brboi/odoo-env/src/brboi/main"
+    }
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Start Odoo",
+        "type": "debugpy",
+        "request": "launch",
+        "console": "integratedTerminal",
+        "cwd": "${workspaceFolder:community}",
+        "program": "odoo-bin",
+        "justMyCode": false,
+        "pythonArgs": [
+          "-Xfrozen_modules=off"
+        ],
+        "args": [
+          "--config=/home/boi/dev/brboi/odoo-env/workspaces/ring-the-phone/odoorc",
+          "--dev=all"
+        ],
+        "env": {
+          "ODOO_ENV_NAME": "ring-the-phone",
+          "ODOO_VERSION": "master",
+          "ODOO_RC": "/home/boi/dev/brboi/odoo-env/workspaces/ring-the-phone/odoorc",
+          "PYTHONPATH": "${workspaceFolder:community}",
+          "ODOO_ADDONS_PATH": "/home/boi/dev/brboi/odoo-env/src/brboi/main,/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone,/home/boi/dev/brboi/odoo-env/src/community/master-parrot/addons,/home/boi/dev/brboi/odoo-env/src/community/master-parrot/odoo/addons",
+          "ODOO_PORT": "8070",
+          "ODOO_PATH": "${workspaceFolder:community}",
+          "ODOO_ENTERPRISE_PATH": "/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone",
+          "ODOO_EXTRA_PATHS": "/home/boi/dev/brboi/odoo-env/src/brboi/main",
+          "COMMUNITY": "${workspaceFolder:community}",
+          "ENTERPRISE": "/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone",
+          "BRBOI": "/home/boi/dev/brboi/odoo-env/src/brboi/main"
+        }
+      },
+      {
+        "name": "Start Debug Shell",
+        "type": "debugpy",
+        "request": "launch",
+        "console": "integratedTerminal",
+        "cwd": "${workspaceFolder:community}",
+        "program": "odoo-bin",
+        "justMyCode": false,
+        "pythonArgs": [
+          "-Xfrozen_modules=off"
+        ],
+        "args": [
+          "shell",
+          "--config=/home/boi/dev/brboi/odoo-env/workspaces/ring-the-phone/odoorc",
+          "--dev=all"
+        ],
+        "env": {
+          "ODOO_ENV_NAME": "ring-the-phone",
+          "ODOO_VERSION": "master",
+          "ODOO_RC": "/home/boi/dev/brboi/odoo-env/workspaces/ring-the-phone/odoorc",
+          "PYTHONPATH": "${workspaceFolder:community}",
+          "ODOO_ADDONS_PATH": "/home/boi/dev/brboi/odoo-env/src/brboi/main,/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone,/home/boi/dev/brboi/odoo-env/src/community/master-parrot/addons,/home/boi/dev/brboi/odoo-env/src/community/master-parrot/odoo/addons",
+          "ODOO_PORT": "8070",
+          "ODOO_PATH": "${workspaceFolder:community}",
+          "ODOO_ENTERPRISE_PATH": "/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone",
+          "ODOO_EXTRA_PATHS": "/home/boi/dev/brboi/odoo-env/src/brboi/main",
+          "COMMUNITY": "${workspaceFolder:community}",
+          "ENTERPRISE": "/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone",
+          "BRBOI": "/home/boi/dev/brboi/odoo-env/src/brboi/main"
+        }
+      },
+      {
+        "name": "Run Console Tests",
+        "type": "debugpy",
+        "request": "launch",
+        "console": "integratedTerminal",
+        "cwd": "${workspaceFolder:community}",
+        "program": "odoo-bin",
+        "justMyCode": false,
+        "pythonArgs": [
+          "-Xfrozen_modules=off"
+        ],
+        "args": [
+          "--config=/home/boi/dev/brboi/odoo-env/workspaces/ring-the-phone/odoorc",
+          "--dev=all",
+          "--test-enable",
+          "--test-tags=${input:odooTestTags}",
+          "--stop-after-init"
+        ],
+        "env": {
+          "ODOO_ENV_NAME": "ring-the-phone",
+          "ODOO_VERSION": "master",
+          "ODOO_RC": "/home/boi/dev/brboi/odoo-env/workspaces/ring-the-phone/odoorc",
+          "PYTHONPATH": "${workspaceFolder:community}",
+          "ODOO_ADDONS_PATH": "/home/boi/dev/brboi/odoo-env/src/brboi/main,/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone,/home/boi/dev/brboi/odoo-env/src/community/master-parrot/addons,/home/boi/dev/brboi/odoo-env/src/community/master-parrot/odoo/addons",
+          "ODOO_PORT": "8070",
+          "ODOO_PATH": "${workspaceFolder:community}",
+          "ODOO_ENTERPRISE_PATH": "/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone",
+          "ODOO_EXTRA_PATHS": "/home/boi/dev/brboi/odoo-env/src/brboi/main",
+          "COMMUNITY": "${workspaceFolder:community}",
+          "ENTERPRISE": "/home/boi/dev/brboi/odoo-env/src/enterprise/master-parrot-ring-the-phone",
+          "BRBOI": "/home/boi/dev/brboi/odoo-env/src/brboi/main"
+        }
+      }
+    ],
+    "inputs": [
+      {
+        "id": "odooTestTags",
+        "type": "promptString",
+        "description": "Choose a type of tests. Prefixes are: <none> for tags, / for modules, : for classes, . for methods."
+      }
+    ]
+  }
+}
