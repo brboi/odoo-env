@@ -1,3 +1,5 @@
+> Deprecated, replaced by https://github.com/brboi/ow
+
 # odoo-env
 
 Odoo development environment using [mise](https://mise.jdx.dev/) and Git worktrees.
